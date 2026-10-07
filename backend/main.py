@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, status, Query, Header, Depends
+from fastapi import FastAPI, HTTPException, status, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from backend.config import PORT
@@ -11,6 +11,8 @@ from backend.database import (
     get_or_create_conversation_in_db, insert_message_in_db, mark_conversation_read_in_db,
     insert_trip_in_db, fetch_trips_from_db, fetch_trip_by_id_from_db, cancel_trip_in_db,
     create_booking_in_db, fetch_bookings_from_db, fetch_booking_by_id_from_db, cancel_booking_in_db,
+    create_razorpay_order_in_db, update_payment_status_in_db,
+    verify_payment_and_book_in_db, process_razorpay_webhook_event,
     create_passenger_request_in_db, fetch_passenger_requests_from_db, cancel_passenger_request_in_db,
     create_luggage_package_in_db, fetch_luggage_packages_from_db, cancel_luggage_package_in_db,
     fetch_vehicles_from_db, insert_vehicle_in_db, delete_vehicle_in_db, update_profile_in_db,
@@ -22,11 +24,21 @@ from backend.database import (
 from backend.schemas import (
     SignUpRequest, LoginRequest, UserProfile, UserProfileUpdate,
     VehicleSchema, VehicleCreate, TripSchema, TripCreate,
-    BookingCreate, BookingResponse, PassengerRequestSchema, PassengerRequestCreate,
+    BookingCreate, BookingResponse, PaymentOrderCreate, PaymentOrderResponse, PaymentStatusUpdate,
+    PaymentVerifyRequest, PaymentVerifyResponse,
+    PassengerRequestSchema, PassengerRequestCreate,
     LuggagePackageSchema, LuggagePackageCreate, MessageSchema, ConversationSchema,
     MessageSendRequest, NotificationItemSchema, UniversityOptionSchema,
     StudentVerifyRequest, IdVerificationRequest, SupportTicketCreate, PayoutRequest
 )
+from backend.matching import (
+    MatchingEngine, MatchingRequest, MatchingResponse,
+    AssignmentRequest, AssignmentResponse
+)
+from backend.pricing import (
+    DynamicPricingEngine, PriceEstimateRequest, PriceBreakdown
+)
+
 
 app = FastAPI(
     title="TopRide API",
@@ -397,6 +409,88 @@ def cancel_booking(
     success = cancel_booking_in_db(booking_id=booking_id, user_id=user_id, reason=reason, client=scoped_client)
     return {"success": success, "message": "Booking cancelled successfully"}
 
+# ================= 6B. RAZORPAY TEST MODE PAYMENTS =================
+@app.post("/api/payments/razorpay/order", response_model=PaymentOrderResponse)
+def create_razorpay_order(
+    req: PaymentOrderCreate,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    """Validate trip, requested seats, and create an authentic Razorpay TEST order."""
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return create_razorpay_order_in_db(user_id=user_id, req=req, client=scoped_client)
+
+@app.post("/api/payments/razorpay/record-status")
+def record_payment_status(
+    req: PaymentStatusUpdate,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    """Record payment status change (failed, cancelled) in database."""
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return update_payment_status_in_db(user_id=user_id, req=req, client=scoped_client)
+
+@app.post("/api/payments/razorpay/verify", response_model=PaymentVerifyResponse)
+def verify_razorpay_payment(
+    req: PaymentVerifyRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    """Authoritatively verify Razorpay payment signature and atomically book seats."""
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return verify_payment_and_book_in_db(user_id=user_id, req=req, client=scoped_client)
+
+@app.post("/api/payments/razorpay/webhook")
+async def razorpay_webhook(
+    request: Request,
+    x_razorpay_signature: Optional[str] = Header(None, alias="X-Razorpay-Signature")
+):
+    """Receive and process Razorpay webhooks with signature verification and idempotency."""
+    raw_body = await request.body()
+    return process_razorpay_webhook_event(raw_body=raw_body, signature=x_razorpay_signature)
+
+
+# ================= 6C. AUTOMATIC WEIGHTED MATCHING & ASSIGNMENT =================
+@app.post("/api/matching/find", response_model=MatchingResponse)
+def find_matching_trips(
+    req: MatchingRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Find and rank candidate trips using deterministic weighted scoring (0-100).
+    Applies hard constraint filtering, local feature calculations, and deterministic tie breaking.
+    Zero external API calls.
+    """
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization and authorization.startswith("Bearer ") else None
+    user_id = get_optional_user_id(authorization)
+    scoped_client = get_user_supabase_client(token)
+
+    # Attach authoritative passenger_id if authenticated
+    if user_id and not req.passenger_id:
+        req.passenger_id = user_id
+
+    return MatchingEngine.match(req, client=scoped_client)
+
+
+@app.post("/api/matching/assign", response_model=AssignmentResponse)
+def assign_matching_trip(
+    req: AssignmentRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Atomically assign and book the highest ranked eligible trip.
+    Cascades through top candidates (up to MAX_ASSIGNMENT_ATTEMPTS = 3) if race condition occurs.
+    Authoritative passenger identity from JWT (auth.uid()).
+    """
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return MatchingEngine.assign(passenger_id=user_id, request=req, client=scoped_client)
+
+
 # ================= 7. PASSENGER REQUESTS =================
 @app.get("/api/requests", response_model=List[PassengerRequestSchema])
 def list_passenger_requests(authorization: Optional[str] = Header(None)):
@@ -650,3 +744,40 @@ def get_preferences(user_id: str = Depends(get_authenticated_user_id)):
 def update_preferences(prefs: dict, user_id: str = Depends(get_authenticated_user_id)):
     db.preferences[user_id] = prefs
     return {"success": True, "preferences": prefs}
+
+# ================= 15. DYNAMIC PRICING ENGINE =================
+@app.post("/api/pricing/estimate", response_model=PriceBreakdown)
+def estimate_trip_market_price(
+    req: PriceEstimateRequest,
+    authorization: Optional[str] = Header(None)
+):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization and "Bearer " in authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return DynamicPricingEngine.calculate_price(req, client=scoped_client)
+
+# ================= 16. AUTOMATIC MATCHING =================
+@app.post("/api/matching/find", response_model=MatchingResponse)
+def find_matching_trips(
+    req: MatchingRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return MatchingEngine.find_matches(req, user_id=user_id, client=scoped_client)
+
+@app.post("/api/matching/assign", response_model=AssignmentResponse)
+def assign_matched_trip(
+    req: AssignmentRequest,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return MatchingEngine.auto_assign(req, user_id=user_id, client=scoped_client)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=PORT, reload=True)
+
+

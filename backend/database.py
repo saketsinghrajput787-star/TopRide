@@ -1,16 +1,25 @@
 import asyncio
 import uuid
 import datetime
+import json
+import hmac
+import hashlib
 from typing import Dict, List, Optional, Any
 from fastapi import HTTPException
+import razorpay
 from supabase import create_client, Client, ClientOptions
-from backend.config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY
+from backend.config import (
+    SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY,
+    RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
+)
 from backend.schemas import (
     UserProfile, UserProfileUpdate, VehicleSchema, VehicleCreate, TripSchema, TripCreate,
     BookingCreate, BookingResponse, PassengerRequestSchema, PassengerRequestCreate,
     LuggagePackageSchema, LuggagePackageCreate, ConversationSchema, MessageSchema,
     NotificationItemSchema, UniversityOptionSchema, StudentVerifyRequest,
-    IdVerificationRequest, SupportTicketCreate
+    IdVerificationRequest, SupportTicketCreate,
+    PaymentOrderCreate, PaymentOrderResponse, PaymentStatusUpdate,
+    PaymentVerifyRequest, PaymentVerifyResponse
 )
 
 # Initialize Supabase client
@@ -19,6 +28,9 @@ supabase_client: Client = create_client(SUPABASE_URL, key_to_use)
 
 # Concurrency lock for seat booking operations
 booking_lock = asyncio.Lock()
+
+# Cache for active Razorpay test orders (deduplication / fallback before migration)
+_recent_razorpay_orders: Dict[str, Any] = {}
 
 # Initial seed data from Phase 1
 INITIAL_USER = UserProfile(
@@ -1024,7 +1036,7 @@ def trip_row_to_schema(
         duration=row.get("duration") or "",
         totalSeats=total_seats,
         availableSeats=available_seats,
-        pricePerSeat=float(row.get("price_per_seat") or 0.0),
+        pricePerSeat=float(row.get("current_market_price") if row.get("current_market_price") is not None else (row.get("price_per_seat") or 0.0)),
         currency=row.get("currency") or "₹",
         vehicle=veh_schema,
         luggageAllowed=row.get("luggage_allowed") or "Medium",
@@ -1043,7 +1055,11 @@ def trip_row_to_schema(
         destinationLongitude=float(row["destination_longitude"]) if row.get("destination_longitude") is not None else None,
         destinationPlaceId=row.get("destination_place_id"),
         destinationAddress=row.get("destination_address"),
-        routeGeometry=row.get("route_geometry")
+        routeGeometry=row.get("route_geometry"),
+        basePrice=float(row["base_price"]) if row.get("base_price") is not None else None,
+        currentMarketPrice=float(row["current_market_price"]) if row.get("current_market_price") is not None else float(row.get("price_per_seat") or 0.0),
+        pricingMetadata=row.get("pricing_metadata") if isinstance(row.get("pricing_metadata"), dict) else None,
+        priceUpdatedAt=str(row.get("price_updated_at")) if row.get("price_updated_at") is not None else None
     )
 
 def insert_trip_in_db(
@@ -1100,7 +1116,61 @@ def insert_trip_in_db(
             print(f"[Supabase] Vehicle linking notice: {e}")
             real_vehicle_id = None
 
-    # 2. Attempt transactional RPC first
+    # 2. Authoritative Platform Market Price Calculation
+    veh_cat = None
+    if payload.vehicle and payload.vehicle.model:
+        v_str = f"{payload.vehicle.make or ''} {payload.vehicle.model or ''}".lower()
+        if any(w in v_str for w in ["innova", "xuv", "harrier", "safari", "creta", "seltos", "fortuner", "scorpio", "suv"]):
+            veh_cat = "suv"
+        elif any(w in v_str for w in ["audi", "bmw", "mercedes", "jaguar", "lexus"]):
+            veh_cat = "luxury"
+        elif any(w in v_str for w in ["swift", "i10", "i20", "wagonr", "tiago", "polo", "baleno", "altroz"]):
+            veh_cat = "hatchback"
+        else:
+            veh_cat = "sedan"
+
+    try:
+        from backend.pricing.engine import DynamicPricingEngine
+        from backend.pricing.models import PriceEstimateRequest
+        p_req = PriceEstimateRequest(
+            origin=payload.origin,
+            destination=payload.destination,
+            travelDate=payload.date,
+            departureTime=payload.departureTime,
+            originLat=payload.originLatitude,
+            originLon=payload.originLongitude,
+            destLat=payload.destinationLatitude,
+            destLon=payload.destinationLongitude,
+            totalSeats=payload.totalSeats,
+            availableSeats=payload.totalSeats,
+            vehicleCategory=veh_cat,
+            durationStr=payload.duration,
+            routeGeometry=payload.routeGeometry
+        )
+        p_breakdown = DynamicPricingEngine.calculate_price(p_req, client=c)
+        calculated_final_price = p_breakdown.finalPrice
+        calculated_base_price = p_breakdown.basePrice
+        calculated_metadata = p_breakdown.model_dump()
+    except Exception as pr_err:
+        print(f"[Pricing] Calculation fallback notice: {pr_err}")
+        try:
+            from backend.pricing.base_price import BasePriceEngine
+            calculated_base_price = BasePriceEngine.calculate_base_price(
+                origin=payload.origin,
+                destination=payload.destination,
+                origin_lat=payload.originLatitude,
+                origin_lon=payload.originLongitude,
+                dest_lat=payload.destinationLatitude,
+                dest_lon=payload.destinationLongitude,
+                vehicle=veh_cat
+            )
+            calculated_final_price = calculated_base_price
+        except Exception:
+            calculated_final_price = 650.0
+            calculated_base_price = 650.0
+        calculated_metadata = {"fallback": True, "error": str(pr_err)}
+
+    # 3. Attempt transactional RPC first
     trip_id: Optional[str] = None
     try:
         rpc_payload = {
@@ -1115,7 +1185,7 @@ def insert_trip_in_db(
             "arrival_time": payload.arrivalTime or "",
             "duration": payload.duration or "",
             "total_seats": payload.totalSeats,
-            "price_per_seat": float(payload.pricePerSeat),
+            "price_per_seat": calculated_final_price,
             "currency": payload.currency or "₹",
             "luggage_allowed": payload.luggageAllowed or "Medium",
             "luggage_details": payload.luggageDetails or "",
@@ -1138,7 +1208,7 @@ def insert_trip_in_db(
                 "p_arrival_time": payload.arrivalTime or "",
                 "p_duration": payload.duration or "",
                 "p_total_seats": payload.totalSeats,
-                "p_price_per_seat": payload.pricePerSeat,
+                "p_price_per_seat": calculated_final_price,
                 "p_currency": payload.currency or "₹",
                 "p_luggage_allowed": payload.luggageAllowed or "Medium",
                 "p_luggage_details": payload.luggageDetails or "",
@@ -1149,7 +1219,12 @@ def insert_trip_in_db(
 
         if rpc_res.data and isinstance(rpc_res.data, dict) and rpc_res.data.get("trip_id"):
             trip_id = str(rpc_res.data["trip_id"])
-            coord_update = {}
+            coord_update = {
+                "base_price": calculated_base_price,
+                "current_market_price": calculated_final_price,
+                "pricing_metadata": calculated_metadata,
+                "price_updated_at": now_iso
+            }
             if payload.originLatitude is not None:
                 coord_update["origin_latitude"] = float(payload.originLatitude)
             if payload.originLongitude is not None:
@@ -1172,12 +1247,12 @@ def insert_trip_in_db(
                 try:
                     c.table("trips").update(coord_update).eq("id", trip_id).execute()
                 except Exception as up_err:
-                    print(f"[Supabase] Updating coordinates after RPC notice: {up_err}")
+                    print(f"[Supabase] Updating pricing/coordinates after RPC notice: {up_err}")
     except Exception as rpc_err:
         print(f"[Supabase] create_trip_with_seats RPC notice: {rpc_err}")
         trip_id = None
 
-    # 3. Direct insert fallback with atomic rollback guarantee
+    # 4. Direct insert fallback with atomic rollback guarantee
     if not trip_id:
         trip_id = str(uuid.uuid4())
         trip_payload = {
@@ -1193,7 +1268,11 @@ def insert_trip_in_db(
             "duration": payload.duration or "",
             "total_seats": payload.totalSeats,
             "available_seats": payload.totalSeats,
-            "price_per_seat": payload.pricePerSeat,
+            "price_per_seat": calculated_final_price,
+            "base_price": calculated_base_price,
+            "current_market_price": calculated_final_price,
+            "pricing_metadata": calculated_metadata,
+            "price_updated_at": now_iso,
             "currency": payload.currency or "₹",
             "luggage_allowed": payload.luggageAllowed or "Medium",
             "luggage_details": payload.luggageDetails or "",
@@ -1235,9 +1314,10 @@ def insert_trip_in_db(
         except Exception as e:
             err_str = str(e).lower()
             if "column" in err_str or "does not exist" in err_str or "origin_latitude" in err_str:
-                print(f"[Supabase Notice] Coordinate columns pending migration in Supabase SQL editor: {e}")
+                print(f"[Supabase Notice] Coordinate/pricing columns pending migration in Supabase SQL editor: {e}")
                 for k in ["origin_latitude", "origin_longitude", "origin_place_id", "origin_address",
-                          "destination_latitude", "destination_longitude", "destination_place_id", "destination_address", "route_geometry"]:
+                          "destination_latitude", "destination_longitude", "destination_place_id", "destination_address", "route_geometry",
+                          "base_price", "current_market_price", "pricing_metadata", "price_updated_at"]:
                     trip_payload.pop(k, None)
                 t_res = c.table("trips").insert(trip_payload).execute()
             else:
@@ -1275,6 +1355,13 @@ def insert_trip_in_db(
             upsert_profile_in_db(prof, client=c)
     except Exception:
         pass
+
+    # 5. Trigger event-driven recalculation for affected market
+    try:
+        from backend.pricing.service import PricingService
+        PricingService.handle_trip_event(trip_id, client=c)
+    except Exception as pr_evt_err:
+        print(f"[Pricing] Post-trip recalculation notice: {pr_evt_err}")
 
     fresh_row = c.table("trips").select("*").eq("id", trip_id).execute()
     if not fresh_row.data:
@@ -1387,10 +1474,10 @@ def cancel_trip_in_db(
     reason: str = "Trip cancelled by driver",
     client: Optional[Client] = None
 ) -> bool:
-    """Cancel a trip in public.trips if authenticated user is the driver."""
+    """Cancel a trip in public.trips if authenticated user is the driver, updating bookings and notifying passengers."""
     c = client or supabase_client
     try:
-        t_res = c.table("trips").select("id, driver_id").eq("id", trip_id).execute()
+        t_res = c.table("trips").select("id, driver_id, origin, destination, date").eq("id", trip_id).execute()
         if not t_res.data or len(t_res.data) == 0:
             raise HTTPException(status_code=404, detail="Trip not found.")
         trip_row = t_res.data[0]
@@ -1409,6 +1496,53 @@ def cancel_trip_in_db(
         except Exception:
             pass
 
+        # Update all active bookings on this trip to cancelled and notify passengers
+        try:
+            b_res = supabase_client.table("bookings").select("id, passenger_id, seats_count").eq("trip_id", trip_id).neq("booking_status", "cancelled").execute()
+            if b_res.data:
+                for b_row in b_res.data:
+                    supabase_client.table("bookings").update({
+                        "booking_status": "cancelled",
+                        "updated_at": now_iso
+                    }).eq("id", b_row["id"]).execute()
+
+                    pass_id = str(b_row["passenger_id"])
+                    notif_id = str(uuid.uuid4())
+                    notif_obj = NotificationItemSchema(
+                        id=notif_id,
+                        userId=pass_id,
+                        title="Trip Cancelled by Driver",
+                        description=f"The driver cancelled this ride ({trip_row.get('origin', '')} → {trip_row.get('destination', '')} on {trip_row.get('date', 'scheduled date')}). Reason: {reason}. Full refund initiated.",
+                        time=now_iso,
+                        read=False,
+                        type="trip",
+                        targetScreen="trips",
+                        targetId=trip_id
+                    )
+                    db.notifications.insert(0, notif_obj)
+                    try:
+                        supabase_client.table("notifications").insert({
+                            "id": notif_id,
+                            "user_id": pass_id,
+                            "title": notif_obj.title,
+                            "description": notif_obj.description,
+                            "read": False,
+                            "type": "trip",
+                            "target_screen": "trips",
+                            "target_id": trip_id,
+                            "created_at": now_iso
+                        }).execute()
+                    except Exception:
+                        pass
+        except Exception as notify_err:
+            print(f"[Supabase] cancel_trip notify error: {notify_err}")
+
+        try:
+            from backend.pricing.service import PricingService
+            PricingService.handle_trip_event(trip_id, client=c)
+        except Exception as pr_evt_err:
+            print(f"[Pricing] Post-cancel recalculation notice: {pr_evt_err}")
+
         return True
     except HTTPException:
         raise
@@ -1417,17 +1551,551 @@ def cancel_trip_in_db(
         raise HTTPException(status_code=500, detail=f"Failed to cancel trip: {str(e)}")
 
 # ============================================================
-# PHASE 2B: BOOKINGS (TRANSACTIONAL & CONCURRENCY SAFE)
+# PHASE 2B / 3B: BOOKINGS & RAZORPAY TEST ORDER CREATION
 # ============================================================
+
+def create_razorpay_order_in_db(
+    user_id: str,
+    req: PaymentOrderCreate,
+    client: Optional[Client] = None
+) -> PaymentOrderResponse:
+    """Validate trip, seats, calculate authoritative price, and create Razorpay TEST order."""
+    c = client or supabase_client
+
+    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Razorpay test credentials are not configured on the backend."
+        )
+
+    if req.seatsCount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Please select a valid seat count (minimum 1 seat)."
+        )
+
+    # 1. Fetch trip from database
+    trip = fetch_trip_by_id_from_db(req.tripId, user_id=user_id, client=c)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+
+    # 2. Check trip status
+    if trip.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Trip is no longer open for booking.")
+
+    # 3. Check driver self-booking
+    if trip.driverId == user_id:
+        raise HTTPException(status_code=400, detail="Drivers cannot book their own trip.")
+
+    # 4. Check seat availability
+    if trip.availableSeats < req.seatsCount:
+        raise HTTPException(
+            status_code=409,
+            detail="These seats are no longer available."
+        )
+
+    # 5. Authoritative price calculation server-side
+    # IMMUTABILITY RULE: current_market_price -> booking.price_at_booking -> Razorpay order amount
+    # Once price_at_booking exists, Razorpay MUST use price_at_booking, never a newly recalculated current_market_price.
+    effective_unit_price = float(trip.currentMarketPrice if trip.currentMarketPrice is not None else trip.pricePerSeat)
+    booking_price_frozen = None
+
+    if getattr(req, "bookingId", None):
+        try:
+            b_res = c.table("bookings").select("price_at_booking, total_paid").eq("id", req.bookingId).execute()
+            if b_res.data and len(b_res.data) > 0:
+                p_book = b_res.data[0].get("price_at_booking")
+                if p_book is not None and float(p_book) > 0:
+                    booking_price_frozen = float(p_book)
+        except Exception:
+            pass
+
+    if booking_price_frozen is None:
+        try:
+            b_res = c.table("bookings").select("price_at_booking, total_paid").eq("trip_id", req.tripId).eq("passenger_id", user_id).in_("status", ["pending", "confirmed"]).order("created_at", desc=True).limit(1).execute()
+            if b_res.data and len(b_res.data) > 0:
+                p_book = b_res.data[0].get("price_at_booking")
+                if p_book is not None and float(p_book) > 0:
+                    booking_price_frozen = float(p_book)
+        except Exception:
+            pass
+
+    if booking_price_frozen is not None:
+        effective_unit_price = booking_price_frozen
+
+    luggage_fee = 100.0 if req.luggageTier == "medium" else (200.0 if req.luggageTier == "heavy" else 0.0)
+    total_rupees = round(effective_unit_price * req.seatsCount + luggage_fee, 2)
+    amount_paise = int(round(total_rupees * 100))
+
+    if amount_paise <= 0:
+        raise HTTPException(status_code=400, detail="Invalid order amount calculated.")
+
+    # 6. Deduplication check: Check memory cache and database for existing active 'created' order
+    cache_key = f"{user_id}:{req.tripId}:{req.seatsCount}:{req.luggageTier or 'small'}:{effective_unit_price}"
+    if cache_key in _recent_razorpay_orders:
+        cached_time, cached_order = _recent_razorpay_orders[cache_key]
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if (now - cached_time).total_seconds() < 1200:  # 20 minutes
+            return cached_order
+
+    try:
+        existing_orders = c.table("payment_orders").select("*").eq("user_id", user_id).eq("trip_id", req.tripId).eq("seats_count", req.seatsCount).eq("status", "created").order("created_at", desc=True).limit(1).execute()
+        if existing_orders.data and len(existing_orders.data) > 0:
+            existing = existing_orders.data[0]
+            created_at_str = existing.get("created_at")
+            if created_at_str:
+                try:
+                    dt = datetime.datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                    now = datetime.datetime.now(datetime.timezone.utc)
+                    if (now - dt).total_seconds() < 1200:  # 20 minutes
+                        cached_order = PaymentOrderResponse(
+                            orderId=existing["razorpay_order_id"],
+                            amount=int(existing["amount_paise"]),
+                            amountRupees=float(existing["amount"]),
+                            currency=existing.get("currency", "INR"),
+                            keyId=RAZORPAY_KEY_ID,
+                            tripId=req.tripId,
+                            seatsCount=req.seatsCount,
+                            receipt=existing.get("receipt", "")
+                        )
+                        _recent_razorpay_orders[cache_key] = (dt, cached_order)
+                        return cached_order
+                except Exception:
+                    pass
+    except Exception:
+        # Table might not exist yet before migration is applied
+        pass
+
+    # 7. Create Razorpay TEST order via Razorpay client
+    receipt = f"rcpt_{uuid.uuid4().hex[:10]}"
+    try:
+        rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        rzp_order = rzp_client.order.create(data={
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt,
+            "notes": {
+                "trip_id": req.tripId,
+                "user_id": user_id,
+                "seats_count": str(req.seatsCount),
+                "luggage_tier": req.luggageTier or "small",
+                "route": f"{trip.origin} to {trip.destination}",
+                "mode": "test"
+            }
+        })
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[Razorpay] Order creation error: {err_msg}")
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to initialize Razorpay checkout. Please verify connection and try again."
+        )
+
+    order_resp = PaymentOrderResponse(
+        orderId=rzp_order["id"],
+        amount=amount_paise,
+        amountRupees=total_rupees,
+        currency="INR",
+        keyId=RAZORPAY_KEY_ID,
+        tripId=req.tripId,
+        seatsCount=req.seatsCount,
+        receipt=receipt
+    )
+
+    # Save to memory cache for instant deduplication
+    _recent_razorpay_orders[cache_key] = (datetime.datetime.now(datetime.timezone.utc), order_resp)
+
+    # 8. Persist order in payment_orders table if available
+    try:
+        c.table("payment_orders").insert({
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "trip_id": req.tripId,
+            "razorpay_order_id": rzp_order["id"],
+            "amount": total_rupees,
+            "amount_paise": amount_paise,
+            "currency": "INR",
+            "seats_count": req.seatsCount,
+            "luggage_tier": req.luggageTier or "small",
+            "receipt": receipt,
+            "status": "created",
+            "metadata": {
+                "notes": rzp_order.get("notes", {}),
+                "origin": trip.origin,
+                "destination": trip.destination
+            }
+        }).execute()
+    except Exception as e:
+        print(f"[Supabase] payment_orders insert notice (table pending migration): {e}")
+
+    return order_resp
+
+def update_payment_status_in_db(
+    user_id: str,
+    req: PaymentStatusUpdate,
+    client: Optional[Client] = None
+) -> dict:
+    """Update status of a payment order (e.g. failed or cancelled) in public.payment_orders."""
+    c = client or supabase_client
+
+    # Invalidate / remove from in-memory cache if cancelled or failed
+    keys_to_remove = [k for k, v in _recent_razorpay_orders.items() if v[1].orderId == req.orderId]
+    for k in keys_to_remove:
+        _recent_razorpay_orders.pop(k, None)
+
+    try:
+        update_data = {
+            "status": req.status,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        if req.paymentId:
+            update_data["razorpay_payment_id"] = req.paymentId
+        c.table("payment_orders").update(update_data).eq("razorpay_order_id", req.orderId).eq("user_id", user_id).execute()
+        return {"success": True}
+    except Exception as e:
+        print(f"[Supabase] update_payment_status_in_db notice: {e}")
+        return {"success": False}
+
+def verify_razorpay_payment_signature(order_id: str, payment_id: str, signature: str) -> bool:
+    """Authoritatively verify Razorpay HMAC SHA256 payment signature using server secret."""
+    if not RAZORPAY_KEY_SECRET or not order_id or not payment_id or not signature:
+        return False
+    data_to_sign = f"{order_id}|{payment_id}".encode("utf-8")
+    expected_sig = hmac.new(
+        RAZORPAY_KEY_SECRET.encode("utf-8"),
+        data_to_sign,
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected_sig, signature)
+
+def verify_payment_and_book_in_db(
+    user_id: str,
+    req: PaymentVerifyRequest,
+    client: Optional[Client] = None
+) -> PaymentVerifyResponse:
+    """Authoritatively verify Razorpay signature on backend and finalize booking atomically."""
+    c = client or supabase_client
+
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Razorpay test credentials are not configured on the backend."
+        )
+
+    # 1. Authoritative Signature Verification
+    if not verify_razorpay_payment_signature(req.razorpayOrderId, req.razorpayPaymentId, req.razorpaySignature):
+        # Update payment order status to failed
+        try:
+            c.table("payment_orders").update({
+                "status": "failed",
+                "razorpay_payment_id": req.razorpayPaymentId,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "metadata": {"failure_reason": "Signature verification failed"}
+            }).eq("razorpay_order_id", req.razorpayOrderId).execute()
+        except Exception as up_err:
+            print(f"[Supabase] payment_orders fail update error: {up_err}")
+
+        raise HTTPException(
+            status_code=400,
+            detail="Payment verification failed. Please try again."
+        )
+
+    # 2. Duplicate Payment / Idempotency & User Ownership Check
+    po_admin = supabase_client.table("payment_orders").select("*").eq("razorpay_order_id", req.razorpayOrderId).execute()
+    if not po_admin.data or len(po_admin.data) == 0:
+        raise HTTPException(status_code=404, detail="Payment order not found.")
+
+    po = po_admin.data[0]
+    if str(po.get("user_id")) != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Payment order does not belong to the authenticated user."
+        )
+
+    # If already paid and has booking, return existing booking (Idempotency)
+    if po.get("status") == "paid" and po.get("booking_id"):
+        trip_schema = fetch_trip_by_id_from_db(req.tripId, user_id=user_id, client=c)
+        existing_booking = BookingResponse(
+            id=str(po["booking_id"]),
+            bookingRef=f"TR-{str(po['booking_id'])[:5].upper()}",
+            trip=trip_schema,
+            seatsCount=int(po.get("seats_count", req.seatsCount)),
+            totalPaid=float(po.get("amount", 0.0)),
+            status="confirmed",
+            razorpayOrderId=req.razorpayOrderId,
+            razorpayPaymentId=req.razorpayPaymentId
+        )
+        return PaymentVerifyResponse(
+            verified=True,
+            booking=existing_booking,
+            orderId=req.razorpayOrderId,
+            paymentId=req.razorpayPaymentId,
+            status="paid"
+        )
+
+    # Check bookings table directly for existing booking with this razorpay_order_id
+    try:
+        b_res = c.table("bookings").select("*").eq("razorpay_order_id", req.razorpayOrderId).execute()
+        if b_res.data and len(b_res.data) > 0:
+            b_row = b_res.data[0]
+            trip_schema = fetch_trip_by_id_from_db(str(b_row["trip_id"]), user_id=user_id, client=c)
+            return PaymentVerifyResponse(
+                verified=True,
+                booking=BookingResponse(
+                    id=str(b_row["id"]),
+                    bookingRef=b_row.get("booking_ref", ""),
+                    trip=trip_schema,
+                    seatsCount=int(b_row.get("seats_count", req.seatsCount)),
+                    totalPaid=float(b_row.get("total_paid", 0.0)),
+                    status="confirmed",
+                    razorpayOrderId=req.razorpayOrderId,
+                    razorpayPaymentId=req.razorpayPaymentId
+                ),
+                orderId=req.razorpayOrderId,
+                paymentId=req.razorpayPaymentId,
+                status="paid"
+            )
+    except Exception:
+        pass
+
+    # 3. Finalize Booking Atomically via existing book_trip_seats RPC
+    booking_payload = BookingCreate(
+        tripId=req.tripId,
+        seatsCount=req.seatsCount,
+        luggageTier=req.luggageTier or "small",
+        passengerNotes=req.passengerNotes or "",
+        totalAmount=0.0,
+        razorpayOrderId=req.razorpayOrderId,
+        razorpayPaymentId=req.razorpayPaymentId,
+        razorpaySignature=req.razorpaySignature
+    )
+
+    booking_resp = create_booking_in_db(passenger_id=user_id, payload=booking_payload, client=c)
+
+    # 4. Invalidate in-memory order cache
+    keys_to_remove = [k for k, v in _recent_razorpay_orders.items() if v[1].orderId == req.razorpayOrderId]
+    for k in keys_to_remove:
+        _recent_razorpay_orders.pop(k, None)
+
+    return PaymentVerifyResponse(
+        verified=True,
+        booking=booking_resp,
+        orderId=req.razorpayOrderId,
+        paymentId=req.razorpayPaymentId,
+        status="paid"
+    )
+
+def process_razorpay_webhook_event(
+    raw_body: bytes,
+    signature: Optional[str]
+) -> Dict[str, Any]:
+    """Verify Razorpay webhook signature and process events with strict idempotency."""
+    webhook_secret = RAZORPAY_WEBHOOK_SECRET
+    if not webhook_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="Razorpay webhook secret is not configured on the backend."
+        )
+
+    if not signature:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Razorpay-Signature header."
+        )
+
+    # 1. HMAC SHA256 Webhook Signature Verification
+    expected_signature = hmac.new(
+        webhook_secret.encode("utf-8"),
+        raw_body,
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected_signature, signature):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Razorpay webhook signature."
+        )
+
+    # 2. Parse Event safely
+    try:
+        event = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload in webhook.")
+
+    event_name = event.get("event")
+    payload = event.get("payload", {})
+    payment_entity = payload.get("payment", {}).get("entity", {})
+    order_entity = payload.get("order", {}).get("entity", {})
+
+    order_id = payment_entity.get("order_id") or order_entity.get("id")
+    payment_id = payment_entity.get("id")
+
+    if not order_id:
+        return {"status": "ignored", "message": "No order_id associated with event"}
+
+    c = supabase_client
+
+    # 3. Payment failed event
+    if event_name == "payment.failed":
+        try:
+            c.table("payment_orders").update({
+                "status": "failed",
+                "razorpay_payment_id": payment_id,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "metadata": {
+                    "event": event_name,
+                    "error_description": payment_entity.get("error_description", "Payment failed")
+                }
+            }).eq("razorpay_order_id", order_id).execute()
+        except Exception as e:
+            print(f"[Webhook] Failed to update payment_order on failure: {e}")
+        return {"status": "success", "message": "Recorded failed payment", "order_id": order_id}
+
+    # 4. Successful payment events: payment.captured, order.paid
+    if event_name in ["payment.captured", "order.paid"]:
+        # Invalidate in-memory cache
+        keys_to_remove = [k for k, v in _recent_razorpay_orders.items() if v[1].orderId == order_id]
+        for k in keys_to_remove:
+            _recent_razorpay_orders.pop(k, None)
+
+        # Lookup payment order
+        po_res = c.table("payment_orders").select("*").eq("razorpay_order_id", order_id).execute()
+        if not po_res.data or len(po_res.data) == 0:
+            return {"status": "ignored", "message": f"Order {order_id} not found in database"}
+
+        po = po_res.data[0]
+
+        # Idempotency: If already marked paid and has booking, do not duplicate
+        if po.get("status") == "paid" and po.get("booking_id"):
+            return {
+                "status": "already_processed",
+                "message": "Payment order already processed and linked to booking",
+                "order_id": order_id,
+                "booking_id": po.get("booking_id")
+            }
+
+        # Check if booking exists in bookings table
+        existing_b = c.table("bookings").select("*").eq("razorpay_order_id", order_id).execute()
+        if existing_b.data and len(existing_b.data) > 0:
+            b_id = existing_b.data[0]["id"]
+            c.table("payment_orders").update({
+                "status": "paid",
+                "booking_id": b_id,
+                "razorpay_payment_id": payment_id,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }).eq("razorpay_order_id", order_id).execute()
+            return {
+                "status": "already_processed",
+                "message": "Linked existing booking",
+                "order_id": order_id,
+                "booking_id": b_id
+            }
+
+        # Safety-net booking: if user's browser was closed before callback reached FastAPI
+        user_id = str(po["user_id"])
+        trip_id = str(po["trip_id"])
+        seats_count = int(po["seats_count"])
+        luggage_tier = po.get("luggage_tier") or "small"
+        authoritative_total = float(po["amount"])
+        booking_ref = f"TR-{uuid.uuid4().hex[:5].upper()}"
+
+        try:
+            rpc_res = c.rpc("book_trip_seats", {
+                "p_trip_id": trip_id,
+                "p_passenger_id": user_id,
+                "p_seats_count": seats_count,
+                "p_luggage_tier": luggage_tier,
+                "p_notes": "Booked via Razorpay Webhook",
+                "p_total_paid": authoritative_total,
+                "p_booking_ref": booking_ref
+            }).execute()
+
+            if rpc_res.data and rpc_res.data.get("success"):
+                b_id = str(rpc_res.data["booking_id"])
+                c.table("payment_orders").update({
+                    "status": "paid",
+                    "booking_id": b_id,
+                    "razorpay_payment_id": payment_id,
+                    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }).eq("razorpay_order_id", order_id).execute()
+
+                c.table("bookings").update({
+                    "razorpay_order_id": order_id,
+                    "razorpay_payment_id": payment_id
+                }).eq("id", b_id).execute()
+
+                return {
+                    "status": "success",
+                    "message": "Booking finalized atomically via webhook",
+                    "order_id": order_id,
+                    "booking_id": b_id
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "message": "Atomic booking RPC returned unsuccessful",
+                    "order_id": order_id
+                }
+        except Exception as book_err:
+            print(f"[Webhook] book_trip_seats error: {book_err}")
+            return {
+                "status": "error",
+                "message": f"Webhook booking failed: {str(book_err)}",
+                "order_id": order_id
+            }
+
+    return {"status": "received", "event": event_name, "order_id": order_id}
 
 def create_booking_in_db(
     passenger_id: str,
     payload: BookingCreate,
     client: Optional[Client] = None
 ) -> BookingResponse:
-    """Create a booking using atomic book_trip_seats RPC function."""
+    """Create a booking using atomic book_trip_seats RPC function with authoritative price."""
     c = client or supabase_client
+
+    # Duplicate payment & idempotency check:
+    if payload.razorpayOrderId:
+        # If signature is supplied with direct booking request, verify it authoritatively
+        if payload.razorpaySignature:
+            if not verify_razorpay_payment_signature(
+                payload.razorpayOrderId,
+                payload.razorpayPaymentId or "",
+                payload.razorpaySignature
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment verification failed. Please try again."
+                )
+
+        try:
+            existing_booking = c.table("bookings").select("*").eq("razorpay_order_id", payload.razorpayOrderId).execute()
+            if existing_booking.data and len(existing_booking.data) > 0:
+                b_row = existing_booking.data[0]
+                trip_s = fetch_trip_by_id_from_db(str(b_row["trip_id"]), user_id=passenger_id, client=c)
+                return BookingResponse(
+                    id=str(b_row["id"]),
+                    bookingRef=b_row.get("booking_ref") or f"TR-{str(b_row['id'])[:5].upper()}",
+                    trip=trip_s,
+                    seatsCount=int(b_row.get("seats_count") or payload.seatsCount),
+                    totalPaid=float(b_row.get("total_paid") or 0.0),
+                    priceAtBooking=float(b_row.get("price_at_booking")) if b_row.get("price_at_booking") is not None else float(trip_s.pricePerSeat if trip_s else 0.0),
+                    status="confirmed",
+                    razorpayOrderId=payload.razorpayOrderId,
+                    razorpayPaymentId=payload.razorpayPaymentId
+                )
+        except Exception:
+            pass
+
     booking_ref = f"TR-{uuid.uuid4().hex[:5].upper()}"
+
+    # Determine authoritative total price from database
+    trip_for_price = fetch_trip_by_id_from_db(payload.tripId, user_id=passenger_id, client=c)
+    if not trip_for_price:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    luggage_fee = 100.0 if payload.luggageTier == "medium" else (200.0 if payload.luggageTier == "heavy" else 0.0)
+    unit_price = float(trip_for_price.currentMarketPrice if trip_for_price.currentMarketPrice is not None else trip_for_price.pricePerSeat)
+    authoritative_total = round(unit_price * payload.seatsCount + luggage_fee, 2)
 
     try:
         rpc_res = c.rpc("book_trip_seats", {
@@ -1436,7 +2104,7 @@ def create_booking_in_db(
             "p_seats_count": payload.seatsCount,
             "p_luggage_tier": payload.luggageTier or "small",
             "p_notes": payload.passengerNotes or "",
-            "p_total_paid": float(payload.totalAmount),
+            "p_total_paid": authoritative_total,
             "p_booking_ref": booking_ref
         }).execute()
 
@@ -1444,7 +2112,40 @@ def create_booking_in_db(
             raise HTTPException(status_code=400, detail="Booking transaction failed.")
 
         booking_id = str(rpc_res.data["booking_id"])
-        trip_schema = fetch_trip_by_id_from_db(payload.tripId, user_id=passenger_id, client=c)
+
+        # Link payment_orders record if razorpayOrderId provided
+        if payload.razorpayOrderId:
+            try:
+                update_order_data = {
+                    "booking_id": booking_id,
+                    "status": "paid",
+                    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }
+                if payload.razorpayPaymentId:
+                    update_order_data["razorpay_payment_id"] = payload.razorpayPaymentId
+                c.table("payment_orders").update(update_order_data).eq("razorpay_order_id", payload.razorpayOrderId).execute()
+            except Exception as pe_err:
+                print(f"[Supabase] payment_orders update error: {pe_err}")
+
+        # Always freeze immutable price_at_booking on confirmed booking
+        try:
+            b_up = {"price_at_booking": unit_price}
+            if payload.razorpayOrderId:
+                b_up["razorpay_order_id"] = payload.razorpayOrderId
+            if payload.razorpayPaymentId:
+                b_up["razorpay_payment_id"] = payload.razorpayPaymentId
+            c.table("bookings").update(b_up).eq("id", booking_id).execute()
+        except Exception as b_up_err:
+            print(f"[Supabase] price_at_booking update notice: {b_up_err}")
+
+        # Trigger event-driven market price recalculation for remaining seats
+        try:
+            from backend.pricing.service import PricingService
+            PricingService.handle_booking_event(payload.tripId, client=c)
+        except Exception as pr_evt:
+            print(f"[Pricing] Post-booking recalculation notice: {pr_evt}")
+
+        trip_schema = trip_for_price or fetch_trip_by_id_from_db(payload.tripId, user_id=passenger_id, client=c)
         if not trip_schema:
             raise HTTPException(status_code=404, detail="Trip record not found after booking.")
 
@@ -1453,8 +2154,11 @@ def create_booking_in_db(
             bookingRef=booking_ref,
             trip=trip_schema,
             seatsCount=payload.seatsCount,
-            totalPaid=payload.totalAmount,
-            status="confirmed"
+            totalPaid=authoritative_total,
+            priceAtBooking=unit_price,
+            status="confirmed",
+            razorpayOrderId=payload.razorpayOrderId,
+            razorpayPaymentId=payload.razorpayPaymentId
         )
     except HTTPException:
         raise
@@ -1561,15 +2265,68 @@ def cancel_booking_in_db(
     reason: str = "Cancelled by user",
     client: Optional[Client] = None
 ) -> bool:
-    """Cancel booking atomically and restore seats via cancel_booking_atomic RPC."""
+    """Cancel booking atomically and restore seats via cancel_booking_atomic RPC, notifying driver."""
     c = client or supabase_client
     try:
+        # Pre-fetch booking details to notify driver if passenger cancels
+        b_info = None
+        try:
+            b_lookup = c.table("bookings").select("id, trip_id, passenger_id, seats_count").eq("id", booking_id).execute()
+            if b_lookup.data:
+                b_info = b_lookup.data[0]
+        except Exception:
+            pass
+
         rpc_res = c.rpc("cancel_booking_atomic", {
             "p_booking_id": booking_id,
             "p_user_id": user_id,
             "p_reason": reason
         }).execute()
         if rpc_res.data and rpc_res.data.get("success"):
+            # If the passenger cancelled, notify the driver
+            if b_info and str(b_info.get("passenger_id")) == user_id:
+                try:
+                    trip_lookup = c.table("trips").select("driver_id, origin, destination").eq("id", b_info["trip_id"]).execute()
+                    if trip_lookup.data:
+                        driver_id = str(trip_lookup.data[0]["driver_id"])
+                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        notif_id = str(uuid.uuid4())
+                        notif_obj = NotificationItemSchema(
+                            id=notif_id,
+                            userId=driver_id,
+                            title="Passenger Cancelled Booking",
+                            description=f"A passenger cancelled {b_info.get('seats_count', 1)} seat(s) for your trip {trip_lookup.data[0].get('origin', '')} → {trip_lookup.data[0].get('destination', '')}. The seats are now available again.",
+                            time=now_iso,
+                            read=False,
+                            type="booking",
+                            targetScreen="trips",
+                            targetId=str(b_info["trip_id"])
+                        )
+                        db.notifications.insert(0, notif_obj)
+                        try:
+                            supabase_client.table("notifications").insert({
+                                "id": notif_id,
+                                "user_id": driver_id,
+                                "title": notif_obj.title,
+                                "description": notif_obj.description,
+                                "read": False,
+                                "type": "booking",
+                                "target_screen": "trips",
+                                "target_id": str(b_info["trip_id"]),
+                                "created_at": now_iso
+                            }).execute()
+                        except Exception:
+                            pass
+                except Exception as notif_err:
+                    print(f"[Supabase] driver notification error on cancel: {notif_err}")
+
+            if b_info and b_info.get("trip_id"):
+                try:
+                    from backend.pricing.service import PricingService
+                    PricingService.handle_booking_event(str(b_info["trip_id"]), client=c)
+                except Exception as pr_evt:
+                    print(f"[Pricing] Post-cancel booking recalculation notice: {pr_evt}")
+
             return True
         return False
     except Exception as e:
@@ -1643,6 +2400,12 @@ def create_passenger_request_in_db(
         if not res.data:
             raise HTTPException(status_code=500, detail="Failed to insert passenger request.")
         
+        try:
+            from backend.pricing.service import PricingService
+            PricingService.handle_passenger_request_event(req_id, client=c)
+        except Exception as pr_evt:
+            print(f"[Pricing] Post-request recalculation notice: {pr_evt}")
+
         return PassengerRequestSchema(
             id=req_id,
             passengerId=passenger_id,
@@ -1737,6 +2500,11 @@ def cancel_passenger_request_in_db(
             raise HTTPException(status_code=403, detail="Unauthorized: You can only cancel your own requests.")
 
         c.table("passenger_requests").update({"status": "cancelled"}).eq("id", request_id).execute()
+        try:
+            from backend.pricing.service import PricingService
+            PricingService.handle_passenger_request_event(request_id, client=c)
+        except Exception as pr_evt:
+            print(f"[Pricing] Post-cancel request recalculation notice: {pr_evt}")
         return True
     except HTTPException:
         raise
@@ -2028,11 +2796,13 @@ def fetch_notifications_from_db(
 ) -> List[NotificationItemSchema]:
     """Fetch notifications for authenticated user."""
     c = client or supabase_client
+    res_list: List[NotificationItemSchema] = []
     try:
         res = c.table("notifications").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
-        return [
-            NotificationItemSchema(
+        for row in (res.data or []):
+            res_list.append(NotificationItemSchema(
                 id=str(row["id"]),
+                userId=user_id,
                 title=row.get("title") or "",
                 description=row.get("description") or "",
                 time=row.get("created_at") or "Recently",
@@ -2040,12 +2810,17 @@ def fetch_notifications_from_db(
                 type=row.get("type") or "system",
                 targetScreen=row.get("target_screen"),
                 targetId=row.get("target_id")
-            )
-            for row in (res.data or [])
-        ]
+            ))
     except Exception as e:
         print(f"[Supabase] fetch_notifications_from_db error: {e}")
-        return []
+
+    # Synchronize memory notifications
+    existing_ids = {n.id for n in res_list}
+    for mem_n in db.notifications:
+        if getattr(mem_n, "userId", None) == user_id and mem_n.id not in existing_ids:
+            res_list.insert(0, mem_n)
+
+    return res_list
 
 def mark_notification_read_in_db(
     notif_id: str,

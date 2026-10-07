@@ -415,6 +415,16 @@ export function App() {
     try {
       const created = await api.createRequest(newReq);
       setPassengerRequests((prev) => [created, ...prev]);
+      const newNotif: NotificationItem = {
+        id: `notif_${Date.now()}`,
+        title: 'Ride Request Published',
+        description: `Your ride request for ${created.origin} → ${created.destination} is live on TopRide.`,
+        time: 'Just now',
+        read: false,
+        type: 'trip',
+        targetScreen: 'find',
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
     } catch (err) {
       setPassengerRequests((prev) => [newReq, ...prev]);
     }
@@ -425,17 +435,43 @@ export function App() {
     try {
       const created = await api.createLuggage(newPkg);
       setLuggagePackages((prev) => [created, ...prev]);
+      const newNotif: NotificationItem = {
+        id: `notif_${Date.now()}`,
+        title: 'Luggage Request Submitted',
+        description: `Your package delivery request for ${created.origin} → ${created.destination} is active.`,
+        time: 'Just now',
+        read: false,
+        type: 'trip',
+        targetScreen: 'trips',
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
     } catch (err) {
       setLuggagePackages((prev) => [newPkg, ...prev]);
     }
   };
 
-  // Cancel Trip
+  // Cancel Trip / Booking
   const handleCancelTrip = async (tripId: string, reason: string) => {
+    const targetTrip = trips.find((t) => t.id === tripId);
     try {
-      await api.cancelTrip(tripId, reason);
-    } catch (err) {
+      if (targetTrip?.isDriverTrip) {
+        await api.cancelTrip(tripId, reason);
+        showToast('Trip cancelled successfully.');
+      } else {
+        // Find passenger booking for this trip
+        const bookings = await api.listBookings(false).catch(() => []);
+        const activeBooking = bookings.find((b: any) => b.tripId === tripId && b.bookingStatus !== 'cancelled');
+        if (activeBooking) {
+          await api.cancelBooking(activeBooking.id, reason);
+          showToast('Reservation cancelled. Full refund initiated.');
+        } else {
+          await api.cancelTrip(tripId, reason);
+          showToast('Reservation cancelled.');
+        }
+      }
+    } catch (err: any) {
       console.warn('API cancel trip fallback:', err);
+      showToast(err?.message || 'Cancelled successfully.');
     }
 
     setTrips((prev) =>
@@ -443,7 +479,9 @@ export function App() {
         if (t.id === tripId) {
           return {
             ...t,
-            status: 'cancelled',
+            status: targetTrip?.isDriverTrip ? 'cancelled' : t.status,
+            isPassengerTrip: false,
+            availableSeats: !targetTrip?.isDriverTrip ? t.availableSeats + (t.bookedSeatCount || 1) : 0,
           };
         }
         return t;
@@ -451,8 +489,10 @@ export function App() {
     );
     const newNotif: NotificationItem = {
       id: `notif_${Date.now()}`,
-      title: 'Trip Cancelled',
-      description: `Reservation cancelled. Refund has been initiated. Reason: ${reason}`,
+      title: targetTrip?.isDriverTrip ? 'Trip Cancelled' : 'Reservation Cancelled',
+      description: targetTrip?.isDriverTrip 
+        ? `You cancelled your trip. Passengers have been notified and refunds initiated. Reason: ${reason}`
+        : `Your reservation has been cancelled. Full refund initiated. Reason: ${reason}`,
       time: 'Just now',
       read: false,
       type: 'payment',

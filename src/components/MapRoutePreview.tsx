@@ -52,167 +52,159 @@ export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
     : null;
 
   useEffect(() => {
+    let isCancelled = false;
+    let map: mapboxgl.Map | null = null;
+
     if (!isMapboxAvailable()) {
       setMapError('Map service is currently unavailable.');
       return;
     }
 
-    if (!resolvedOrigin || !resolvedDest) {
+    if (
+      !resolvedOrigin || 
+      !resolvedDest ||
+      !isFinite(resolvedOrigin.latitude) ||
+      !isFinite(resolvedOrigin.longitude) ||
+      !isFinite(resolvedDest.latitude) ||
+      !isFinite(resolvedDest.longitude)
+    ) {
       setMapError('Map unavailable for this trip.');
+      return;
+    }
+
+    if (!mapContainerRef.current) {
       return;
     }
 
     setMapError(null);
 
-    // Initialize Mapbox map
-    mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
+    try {
+      // Initialize Mapbox map
+      mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current!,
-      style: 'mapbox://styles/mapbox/light-v11',
-      center: [resolvedOrigin.longitude, resolvedOrigin.latitude],
-      zoom: 6,
-      interactive: interactive,
-      attributionControl: false,
-    });
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: 'mapbox://styles/mapbox/light-v11',
+        center: [resolvedOrigin.longitude, resolvedOrigin.latitude],
+        zoom: 6,
+        interactive: interactive,
+        attributionControl: false,
+      });
 
-    mapInstanceRef.current = map;
+      mapInstanceRef.current = map;
 
-    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
-    if (interactive) {
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-    }
-
-    // Add Origin Marker (Emerald Pin)
-    const originEl = document.createElement('div');
-    originEl.className = 'w-6 h-6 rounded-full bg-emerald-500 border-2 border-white shadow-md flex items-center justify-center text-[10px] text-white font-black cursor-pointer';
-    originEl.innerText = 'A';
-    new mapboxgl.Marker({ element: originEl })
-      .setLngLat([resolvedOrigin.longitude, resolvedOrigin.latitude])
-      .setPopup(new mapboxgl.Popup({ offset: 15 }).setHTML(`<strong>${origin}</strong>`))
-      .addTo(map);
-
-    // Add Destination Marker (Rose Pin)
-    const destEl = document.createElement('div');
-    destEl.className = 'w-6 h-6 rounded-full bg-rose-500 border-2 border-white shadow-md flex items-center justify-center text-[10px] text-white font-black cursor-pointer';
-    destEl.innerText = 'B';
-    new mapboxgl.Marker({ element: destEl })
-      .setLngLat([resolvedDest.longitude, resolvedDest.latitude])
-      .setPopup(new mapboxgl.Popup({ offset: 15 }).setHTML(`<strong>${destination}</strong>`))
-      .addTo(map);
-
-    // Fit bounds initially around the two endpoints
-    const bounds = new mapboxgl.LngLatBounds();
-    bounds.extend([resolvedOrigin.longitude, resolvedOrigin.latitude]);
-    bounds.extend([resolvedDest.longitude, resolvedDest.latitude]);
-    map.fitBounds(bounds, { padding: 45, maxZoom: 13, duration: 800 });
-
-    // Fetch and render driving route
-    async function loadRoute() {
-      try {
-        let route = null;
-        if (routeGeometry) {
-          route = { geometry: routeGeometry, distanceKm: 0, durationText: '' };
-        } else {
-          route = await getMapboxRoute(resolvedOrigin!, resolvedDest!);
-        }
-
-        if (route && mapInstanceRef.current) {
-          setRouteInfo(route);
-
-          map.on('load', () => {
-            if (!mapInstanceRef.current) return;
-
-            // Add route GeoJSON source and layer
-            if (!mapInstanceRef.current.getSource('route')) {
-              mapInstanceRef.current.addSource('route', {
-                type: 'geojson',
-                data: {
-                  type: 'Feature',
-                  properties: {},
-                  geometry: route.geometry,
-                },
-              });
-
-              // Route Line Outer Glow
-              mapInstanceRef.current.addLayer({
-                id: 'route-glow',
-                type: 'line',
-                source: 'route',
-                layout: {
-                  'line-join': 'round',
-                  'line-cap': 'round',
-                },
-                paint: {
-                  'line-color': '#2563eb',
-                  'line-width': 8,
-                  'line-opacity': 0.25,
-                },
-              });
-
-              // Main Route Line
-              mapInstanceRef.current.addLayer({
-                id: 'route-main',
-                type: 'line',
-                source: 'route',
-                layout: {
-                  'line-join': 'round',
-                  'line-cap': 'round',
-                },
-                paint: {
-                  'line-color': '#0f172a',
-                  'line-width': 4.5,
-                },
-              });
-
-              // Adjust bounds to route geometry
-              if (route.geometry.coordinates && Array.isArray(route.geometry.coordinates)) {
-                const routeBounds = new mapboxgl.LngLatBounds();
-                route.geometry.coordinates.forEach((coord: [number, number]) => {
-                  routeBounds.extend(coord);
-                });
-                mapInstanceRef.current.fitBounds(routeBounds, { padding: 45, maxZoom: 13, duration: 800 });
-              }
-            }
-          });
-
-          // In case map is already loaded
-          if (map.isStyleLoaded() && !map.getSource('route')) {
-            map.addSource('route', {
-              type: 'geojson',
-              data: {
-                type: 'Feature',
-                properties: {},
-                geometry: route.geometry,
-              },
-            });
-            map.addLayer({
-              id: 'route-glow',
-              type: 'line',
-              source: 'route',
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: { 'line-color': '#2563eb', 'line-width': 8, 'line-opacity': 0.25 },
-            });
-            map.addLayer({
-              id: 'route-main',
-              type: 'line',
-              source: 'route',
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: { 'line-color': '#0f172a', 'line-width': 4.5 },
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('[MapRoutePreview] Could not load route line:', err);
+      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+      if (interactive) {
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
       }
-    }
 
-    loadRoute();
+      // Add Origin Marker (Emerald Pin)
+      const originEl = document.createElement('div');
+      originEl.className = 'w-6 h-6 rounded-full bg-emerald-500 border-2 border-white shadow-md flex items-center justify-center text-[10px] text-white font-black cursor-pointer';
+      originEl.innerText = 'A';
+      new mapboxgl.Marker({ element: originEl })
+        .setLngLat([resolvedOrigin.longitude, resolvedOrigin.latitude])
+        .setPopup(new mapboxgl.Popup({ offset: 15 }).setHTML(`<strong>${origin}</strong>`))
+        .addTo(map);
+
+      // Add Destination Marker (Rose Pin)
+      const destEl = document.createElement('div');
+      destEl.className = 'w-6 h-6 rounded-full bg-rose-500 border-2 border-white shadow-md flex items-center justify-center text-[10px] text-white font-black cursor-pointer';
+      destEl.innerText = 'B';
+      new mapboxgl.Marker({ element: destEl })
+        .setLngLat([resolvedDest.longitude, resolvedDest.latitude])
+        .setPopup(new mapboxgl.Popup({ offset: 15 }).setHTML(`<strong>${destination}</strong>`))
+        .addTo(map);
+
+      // Fit bounds initially around the two endpoints
+      const bounds = new mapboxgl.LngLatBounds();
+      bounds.extend([resolvedOrigin.longitude, resolvedOrigin.latitude]);
+      bounds.extend([resolvedDest.longitude, resolvedDest.latitude]);
+      map.fitBounds(bounds, { padding: 45, maxZoom: 13, duration: 800 });
+
+      // Fetch and render driving route
+      async function loadRoute() {
+        try {
+          let route = null;
+          if (routeGeometry) {
+            route = { geometry: routeGeometry, distanceKm: 0, durationText: '' };
+          } else {
+            route = await getMapboxRoute(resolvedOrigin!, resolvedDest!);
+          }
+
+          if (isCancelled || !mapInstanceRef.current || !map) return;
+
+          if (route) {
+            setRouteInfo(route);
+
+            const addRouteLayers = () => {
+              if (isCancelled || !mapInstanceRef.current || !map) return;
+              try {
+                if (!map.getSource('route')) {
+                  map.addSource('route', {
+                    type: 'geojson',
+                    data: {
+                      type: 'Feature',
+                      properties: {},
+                      geometry: route.geometry,
+                    },
+                  });
+
+                  map.addLayer({
+                    id: 'route-glow',
+                    type: 'line',
+                    source: 'route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '#2563eb', 'line-width': 8, 'line-opacity': 0.25 },
+                  });
+
+                  map.addLayer({
+                    id: 'route-main',
+                    type: 'line',
+                    source: 'route',
+                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                    paint: { 'line-color': '#0f172a', 'line-width': 4.5 },
+                  });
+
+                  if (route.geometry?.coordinates && Array.isArray(route.geometry.coordinates)) {
+                    const routeBounds = new mapboxgl.LngLatBounds();
+                    route.geometry.coordinates.forEach((coord: [number, number]) => {
+                      routeBounds.extend(coord);
+                    });
+                    map.fitBounds(routeBounds, { padding: 45, maxZoom: 13, duration: 800 });
+                  }
+                }
+              } catch (layerErr) {
+                console.warn('[MapRoutePreview] Layer addition notice:', layerErr);
+              }
+            };
+
+            if (map.isStyleLoaded()) {
+              addRouteLayers();
+            } else {
+              map.once('load', addRouteLayers);
+            }
+          }
+        } catch (err) {
+          console.warn('[MapRoutePreview] Could not load route line:', err);
+        }
+      }
+
+      loadRoute();
+    } catch (err) {
+      console.warn('[MapRoutePreview] Map initialization notice:', err);
+      setMapError('Map unavailable for this trip.');
+      return;
+    }
 
     // Ensure map container renders sharp across responsive resize
     const handleResize = () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.resize();
+      if (!isCancelled && mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.resize();
+        } catch (e) {
+          // Ignore resize errors
+        }
       }
     };
     window.addEventListener('resize', handleResize);
@@ -220,9 +212,16 @@ export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
 
     // Cleanup on unmount
     return () => {
+      isCancelled = true;
       window.removeEventListener('resize', handleResize);
       clearTimeout(resizeTimer);
-      map.remove();
+      if (map) {
+        try {
+          map.remove();
+        } catch (e) {
+          // Ignore removal error
+        }
+      }
       mapInstanceRef.current = null;
     };
   }, [
@@ -235,23 +234,22 @@ export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
     interactive,
   ]);
 
-  if (mapError) {
-    return (
-      <div className={`relative w-full ${height} rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 flex flex-col items-center justify-center p-6 text-center select-none ${className}`}>
-        <AlertCircle className="w-8 h-8 text-slate-400 mb-2" />
-        <span className="text-xs font-bold text-slate-700">{mapError}</span>
-        <span className="text-[11px] text-slate-500 mt-1">{origin} → {destination}</span>
-      </div>
-    );
-  }
-
   return (
     <div className={`relative w-full ${height} rounded-2xl overflow-hidden border border-slate-200 shadow-xs ${className}`}>
-      {/* Mapbox container */}
+      {/* Mapbox container - ALWAYS stays mounted in DOM */}
       <div ref={mapContainerRef} className="w-full h-full" />
 
+      {/* Controlled Error Overlay */}
+      {mapError && (
+        <div className="absolute inset-0 bg-slate-100 flex flex-col items-center justify-center p-6 text-center select-none z-20">
+          <AlertCircle className="w-8 h-8 text-slate-400 mb-2" />
+          <span className="text-xs font-bold text-slate-700">{mapError}</span>
+          <span className="text-[11px] text-slate-500 mt-1">{origin} → {destination}</span>
+        </div>
+      )}
+
       {/* Floating Route Distance / Duration Summary Pill */}
-      {showSummary && (
+      {showSummary && !mapError && (
         <div className="absolute top-3 left-3 flex items-center gap-2 z-10 pointer-events-none max-w-[calc(100%-1.5rem)]">
           <div className="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl shadow-md border border-slate-200 text-xs font-bold text-slate-900 flex items-center gap-2 overflow-hidden truncate">
             <Navigation className="w-3.5 h-3.5 text-blue-600 shrink-0" />

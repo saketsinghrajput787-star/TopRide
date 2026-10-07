@@ -47,94 +47,166 @@ export interface RouteData {
   summary?: string;
 }
 
+// Browser/session-local in-memory caches to minimize Mapbox API calls within the active tab/session.
+// Note: These JavaScript Maps are strictly browser-local and session-local (scoped to the current tab lifecycle).
+// They are not shared across separate browser tabs, sessions, or backend server instances.
+const placesCache = new Map<string, LocationData[]>();
+const routeCache = new Map<string, RouteData>();
+const inFlightPlaces = new Map<string, Promise<LocationData[]>>();
+const inFlightRoutes = new Map<string, Promise<RouteData | null>>();
+
 /**
- * Perform real Mapbox Places search with autocomplete
+ * Perform real Mapbox Places search with autocomplete, session caching, and request deduplication
  */
-export async function searchMapboxLocations(query: string): Promise<LocationData[]> {
+export async function searchMapboxLocations(query: string, signal?: AbortSignal): Promise<LocationData[]> {
   const trimmed = query.trim();
   if (!trimmed || trimmed.length < 2) return [];
+
+  const cacheKey = trimmed.toLowerCase();
+  if (placesCache.has(cacheKey)) {
+    return placesCache.get(cacheKey)!;
+  }
+
+  if (inFlightPlaces.has(cacheKey)) {
+    return inFlightPlaces.get(cacheKey)!;
+  }
 
   if (!isMapboxAvailable()) {
     console.warn('[Mapbox] Access token is missing or not configured');
     return [];
   }
 
-  try {
-    const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json?access_token=${MAPBOX_ACCESS_TOKEN}&autocomplete=true&limit=6&language=en`;
-    const response = await fetch(endpoint);
-    
-    if (!response.ok) {
-      console.warn(`[Mapbox] Geocoding API returned status ${response.status}`);
+  const fetchPromise = (async () => {
+    try {
+      const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json?access_token=${MAPBOX_ACCESS_TOKEN}&autocomplete=true&limit=6&language=en`;
+      let response: Response;
+      try {
+        response = await fetch(endpoint, { signal });
+      } catch (firstErr: any) {
+        if (firstErr?.name === 'AbortError') return [];
+        // Maximum one controlled retry for transient network failure
+        response = await fetch(endpoint, { signal });
+      }
+
+      if (!response.ok) {
+        console.warn(`[Mapbox] Geocoding API returned status ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json();
+      if (!data.features || !Array.isArray(data.features)) return [];
+
+      const results: LocationData[] = data.features.map((feature: any) => {
+        const center = Array.isArray(feature?.center) ? feature.center : [0, 0];
+        const lng = typeof center[0] === 'number' && !isNaN(center[0]) ? center[0] : 0;
+        const lat = typeof center[1] === 'number' && !isNaN(center[1]) ? center[1] : 0;
+        const rawPlaceName = typeof feature?.place_name === 'string' ? feature.place_name : '';
+        const rawText = typeof feature?.text === 'string' ? feature.text : '';
+        const name = rawText || (rawPlaceName ? rawPlaceName.split(',')[0].trim() : 'Location');
+        return {
+          name: name || 'Location',
+          formattedAddress: rawPlaceName || undefined,
+          latitude: lat,
+          longitude: lng,
+          placeId: String(feature?.id || Math.random().toString(36).substring(2)),
+        };
+      });
+
+      placesCache.set(cacheKey, results);
+      return results;
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('[Mapbox] searchMapboxLocations error:', error);
+      }
       return [];
+    } finally {
+      inFlightPlaces.delete(cacheKey);
     }
+  })();
 
-    const data = await response.json();
-    if (!data.features || !Array.isArray(data.features)) return [];
-
-    return data.features.map((feature: any) => {
-      const [lng, lat] = feature.center || [0, 0];
-      return {
-        name: feature.text || feature.place_name.split(',')[0],
-        formattedAddress: feature.place_name,
-        latitude: lat,
-        longitude: lng,
-        placeId: feature.id,
-      };
-    });
-  } catch (error) {
-    console.error('[Mapbox] searchMapboxLocations error:', error);
-    return [];
-  }
+  inFlightPlaces.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }
 
 /**
- * Fetch real driving route between origin and destination coordinates
+ * Fetch real driving route between origin and destination coordinates with session caching & deduplication
  */
 export async function getMapboxRoute(
   origin: { latitude: number; longitude: number },
-  destination: { latitude: number; longitude: number }
+  destination: { latitude: number; longitude: number },
+  signal?: AbortSignal
 ): Promise<RouteData | null> {
   if (!isMapboxAvailable()) return null;
   if (!origin?.latitude || !origin?.longitude || !destination?.latitude || !destination?.longitude) {
     return null;
   }
 
-  try {
-    const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`;
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.warn(`[Mapbox Directions] API returned ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    if (!data.routes || data.routes.length === 0) return null;
-
-    const primaryRoute = data.routes[0];
-    const distanceMeters = primaryRoute.distance || 0;
-    const durationSeconds = primaryRoute.duration || 0;
-
-    const distanceKm = Math.round(distanceMeters / 1000);
-    const hours = Math.floor(durationSeconds / 3600);
-    const minutes = Math.round((durationSeconds % 3600) / 60);
-
-    let durationText = '';
-    if (hours > 0) {
-      durationText = `${hours}h ${minutes > 0 ? `${minutes}m` : ''}`.trim();
-    } else {
-      durationText = `${minutes}m`;
-    }
-
-    return {
-      geometry: primaryRoute.geometry,
-      distanceKm,
-      durationText,
-      summary: primaryRoute.legs?.[0]?.summary || '',
-    };
-  } catch (error) {
-    console.error('[Mapbox Directions] Route fetch error:', error);
-    return null;
+  const cacheKey = `${origin.longitude.toFixed(5)},${origin.latitude.toFixed(5)};${destination.longitude.toFixed(5)},${destination.latitude.toFixed(5)}`;
+  if (routeCache.has(cacheKey)) {
+    return routeCache.get(cacheKey)!;
   }
+
+  if (inFlightRoutes.has(cacheKey)) {
+    return inFlightRoutes.get(cacheKey)!;
+  }
+
+  const routePromise = (async () => {
+    try {
+      const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`;
+
+      let response: Response;
+      try {
+        response = await fetch(url, { signal });
+      } catch (firstErr: any) {
+        if (firstErr?.name === 'AbortError') return null;
+        // Maximum one controlled retry for transient network failure
+        response = await fetch(url, { signal });
+      }
+
+      if (!response.ok) {
+        console.warn(`[Mapbox Directions] API returned ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json();
+      if (!data.routes || data.routes.length === 0) return null;
+
+      const primaryRoute = data.routes[0];
+      const distanceMeters = primaryRoute.distance || 0;
+      const durationSeconds = primaryRoute.duration || 0;
+
+      const distanceKm = Math.round(distanceMeters / 1000);
+      const hours = Math.floor(durationSeconds / 3600);
+      const minutes = Math.round((durationSeconds % 3600) / 60);
+
+      let durationText = '';
+      if (hours > 0) {
+        durationText = `${hours}h ${minutes > 0 ? `${minutes}m` : ''}`.trim();
+      } else {
+        durationText = `${minutes}m`;
+      }
+
+      const routeResult: RouteData = {
+        geometry: primaryRoute.geometry,
+        distanceKm,
+        durationText,
+        summary: primaryRoute.legs?.[0]?.summary || '',
+      };
+
+      routeCache.set(cacheKey, routeResult);
+      return routeResult;
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('[Mapbox Directions] Route fetch error:', error);
+      }
+      return null;
+    } finally {
+      inFlightRoutes.delete(cacheKey);
+    }
+  })();
+
+  inFlightRoutes.set(cacheKey, routePromise);
+  return routePromise;
 }
+

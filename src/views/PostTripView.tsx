@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Vehicle, Trip, ScreenId, User, LocationData } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Vehicle, Trip, ScreenId, User, LocationData, PriceBreakdown } from '../types';
+import { api } from '../api';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -8,7 +9,11 @@ import {
   Clock, 
   Sparkles,
   MapPin,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { LocationSearchInput } from '../components/LocationSearchInput';
 import { MapRoutePreview } from '../components/MapRoutePreview';
@@ -53,11 +58,59 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
   const [time, setTime] = useState('08:00');
   const [seats, setSeats] = useState<number>(3);
   const [price, setPrice] = useState<number>(650);
+  const [pricingBreakdown, setPricingBreakdown] = useState<PriceBreakdown | null>(null);
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [showPriceDetails, setShowPriceDetails] = useState(false);
   const [luggageAllowed, setLuggageAllowed] = useState<'None' | 'Small' | 'Medium' | 'Large'>('Medium');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(vehicles[0]?.id || '');
   const [rules, setRules] = useState<string[]>(['No smoking', 'AC on full trip', 'Punctual passengers only']);
 
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) || (vehicles.length > 0 ? vehicles[0] : null);
+
+  // Automatically fetch platform-calculated dynamic market price (debounced, 0 Mapbox calls)
+  useEffect(() => {
+    let active = true;
+    const fetchEstimate = async () => {
+      try {
+        setPricingLoading(true);
+        const vehCategory = selectedVehicle?.model
+          ? (['innova', 'xuv', 'harrier', 'safari', 'creta', 'suv'].some(w => (selectedVehicle.make + ' ' + selectedVehicle.model).toLowerCase().includes(w))
+              ? 'suv'
+              : ['audi', 'bmw', 'mercedes', 'jaguar'].some(w => (selectedVehicle.make + ' ' + selectedVehicle.model).toLowerCase().includes(w))
+              ? 'luxury'
+              : 'sedan')
+          : 'sedan';
+
+        const res = await api.estimatePricing({
+          origin: originLocation?.name || origin,
+          destination: destLocation?.name || destination,
+          travelDate: date,
+          departureTime: time,
+          originLat: originLocation?.latitude,
+          originLon: originLocation?.longitude,
+          destLat: destLocation?.latitude,
+          destLon: destLocation?.longitude,
+          totalSeats: seats,
+          availableSeats: seats,
+          vehicleCategory: vehCategory,
+        });
+        if (active && res && res.finalPrice) {
+          setPricingBreakdown(res);
+          setPrice(res.finalPrice);
+        }
+      } catch (err) {
+        console.warn('Dynamic pricing estimate note:', err);
+      } finally {
+        if (active) setPricingLoading(false);
+      }
+    };
+
+    const timer = setTimeout(fetchEstimate, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [origin, destination, date, time, seats, selectedVehicleId, originLocation, destLocation]);
 
   const handleReview = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +118,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
   };
 
   const handlePublish = () => {
+    const finalCalculatedPrice = pricingBreakdown?.finalPrice || price;
     const newTripPayload: any = {
       driverId: currentUser.id,
       driverName: currentUser.name,
@@ -90,7 +144,10 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
       duration: '8h 30m',
       totalSeats: seats,
       availableSeats: seats,
-      pricePerSeat: price,
+      pricePerSeat: finalCalculatedPrice,
+      basePrice: pricingBreakdown?.basePrice,
+      currentMarketPrice: finalCalculatedPrice,
+      pricingMetadata: pricingBreakdown || undefined,
       currency: '₹',
       vehicleId: selectedVehicle?.id || undefined,
       vehicle: selectedVehicle || undefined,
@@ -236,8 +293,8 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
             </div>
           </div>
 
-          {/* Seats & Price */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Seats & Platform Market Price */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
                 Available Seats
@@ -259,20 +316,60 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Price per seat (₹)
-              </label>
-              <input
-                type="number"
-                min="100"
-                max="5000"
-                step="50"
-                value={price}
-                onChange={(e) => setPrice(parseInt(e.target.value, 10))}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black text-slate-900 text-base focus:outline-hidden"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+                  Platform Market Price
+                </label>
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" /> Market-priced
+                </span>
+              </div>
+              <div className="px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div>
+                  <div className="text-lg font-black text-slate-950 flex items-baseline gap-1">
+                    <span>₹{pricingBreakdown?.finalPrice || price}</span>
+                    <span className="text-xs font-medium text-slate-500">/ seat</span>
+                    {pricingLoading && <span className="text-[10px] text-slate-400 font-normal">updating...</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Base: ₹{pricingBreakdown?.basePrice || 650} • Demand: {pricingBreakdown && pricingBreakdown.demandMultiplier > 1.05 ? 'High' : (pricingBreakdown && pricingBreakdown.demandMultiplier < 0.98 ? 'Low' : 'Normal')}
+                  </div>
+                </div>
+                {pricingBreakdown && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPriceDetails(!showPriceDetails)}
+                    className="text-xs font-bold text-slate-700 hover:text-slate-950 flex items-center gap-0.5 p-1 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                  >
+                    Details {showPriceDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Expandable Price Breakdown */}
+          {showPriceDetails && pricingBreakdown && (
+            <div className="p-3.5 rounded-2xl bg-slate-900 text-white text-xs space-y-2 animate-in fade-in">
+              <div className="flex items-center justify-between font-bold border-b border-slate-800 pb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Market Price Breakdown
+                </span>
+                <span className="text-emerald-400 font-black">₹{pricingBreakdown.finalPrice} / seat</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                <div>Base Market Value: <span className="font-semibold text-white">₹{pricingBreakdown.basePrice}</span></div>
+                <div>Active Demand Ratio: <span className="font-semibold text-white">{pricingBreakdown.demandSupplyRatio.toFixed(2)}x</span></div>
+                <div>Demand Multiplier: <span className="font-semibold text-white">{pricingBreakdown.demandMultiplier.toFixed(2)}x</span></div>
+                <div>Time-to-Departure: <span className="font-semibold text-white">{pricingBreakdown.timeMultiplier.toFixed(2)}x</span></div>
+                <div>Occupancy Adjustment: <span className="font-semibold text-white">{pricingBreakdown.occupancyMultiplier.toFixed(2)}x</span></div>
+                <div>Floor / Cap Limits: <span className="font-semibold text-white">₹{pricingBreakdown.priceFloor} – ₹{pricingBreakdown.priceCeiling}</span></div>
+              </div>
+              <p className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                TopRide calculates market prices using route economics, live supply & demand pressure, and strict bounds to keep carpooling fair and stable.
+              </p>
+            </div>
+          )}
 
           {/* Luggage Allowance */}
           <div>

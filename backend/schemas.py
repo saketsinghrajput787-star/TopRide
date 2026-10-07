@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, Field
 
 # ================= AUTH & USER SCHEMAS =================
@@ -98,6 +98,10 @@ class TripSchema(BaseModel):
     destinationPlaceId: Optional[str] = None
     destinationAddress: Optional[str] = None
     routeGeometry: Optional[dict] = None
+    basePrice: Optional[float] = None
+    currentMarketPrice: Optional[float] = None
+    pricingMetadata: Optional[Dict[str, Any]] = None
+    priceUpdatedAt: Optional[str] = None
 
 class TripCreate(BaseModel):
     origin: str
@@ -109,7 +113,7 @@ class TripCreate(BaseModel):
     arrivalTime: Optional[str] = "16:30"
     duration: Optional[str] = "8h 30m"
     totalSeats: int = 3
-    pricePerSeat: float = 650.0
+    pricePerSeat: Optional[float] = None
     currency: str = "₹"
     vehicleId: Optional[str] = None
     vehicle: Optional[VehicleSchema] = None
@@ -128,7 +132,7 @@ class TripCreate(BaseModel):
     destinationAddress: Optional[str] = None
     routeGeometry: Optional[dict] = None
 
-# ================= BOOKING SCHEMAS =================
+# ================= BOOKING & PAYMENT SCHEMAS =================
 class BookingCreate(BaseModel):
     tripId: str
     seatsCount: int = Field(default=1, ge=1)
@@ -136,6 +140,9 @@ class BookingCreate(BaseModel):
     passengerNotes: Optional[str] = ""
     totalAmount: float
     paymentRef: Optional[str] = None
+    razorpayOrderId: Optional[str] = None
+    razorpayPaymentId: Optional[str] = None
+    razorpaySignature: Optional[str] = None
 
 class BookingResponse(BaseModel):
     id: str
@@ -143,7 +150,49 @@ class BookingResponse(BaseModel):
     trip: TripSchema
     seatsCount: Optional[int] = 1
     totalPaid: Optional[float] = 0.0
+    priceAtBooking: Optional[float] = None
     status: Optional[str] = "confirmed"
+    razorpayOrderId: Optional[str] = None
+    razorpayPaymentId: Optional[str] = None
+
+class PaymentOrderCreate(BaseModel):
+    tripId: str
+    seatsCount: int = Field(default=1, ge=1)
+    luggageTier: Optional[Literal["small", "medium", "heavy"]] = "small"
+    bookingId: Optional[str] = None
+
+class PaymentOrderResponse(BaseModel):
+    orderId: str
+    amount: int  # in paise for Razorpay
+    amountRupees: float
+    currency: str = "INR"
+    keyId: str
+    tripId: str
+    seatsCount: int
+    receipt: str
+
+class PaymentStatusUpdate(BaseModel):
+    orderId: str
+    status: Literal["paid", "failed", "cancelled"]
+    paymentId: Optional[str] = None
+    reason: Optional[str] = None
+
+class PaymentVerifyRequest(BaseModel):
+    tripId: str
+    seatsCount: int = Field(default=1, ge=1)
+    luggageTier: Optional[Literal["small", "medium", "heavy"]] = "small"
+    passengerNotes: Optional[str] = ""
+    razorpayOrderId: str
+    razorpayPaymentId: str
+    razorpaySignature: str
+
+class PaymentVerifyResponse(BaseModel):
+    verified: bool
+    booking: BookingResponse
+    orderId: str
+    paymentId: str
+    status: str
+
 
 # ================= PASSENGER REQUEST SCHEMAS =================
 class PassengerRequestSchema(BaseModel):
@@ -266,6 +315,7 @@ class MessageSendRequest(BaseModel):
 # ================= NOTIFICATION SCHEMAS =================
 class NotificationItemSchema(BaseModel):
     id: str
+    userId: Optional[str] = None
     title: str
     description: str
     time: str

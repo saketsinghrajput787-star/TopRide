@@ -1,35 +1,90 @@
-# TopRide 🚗📦
+# TopRide 🚗📦⚡
 
-> **Full-Stack Intercity Ride-Sharing, Passenger Matching & Peer-to-Peer Luggage Delivery Platform**
+> **Intelligent Intercity Ride-Sharing, Dynamic Market Pricing & P2P Logistics Platform**
 
-TopRide connects commuters, travelers, and students heading in the same direction to share empty car seats and transport parcels along active highway corridors across India. Powered by real-time Mapbox maps, FastAPI, and Supabase PostgreSQL.
+TopRide is a high-performance full-stack mobility platform connecting intercity commuters, travelers, and students across India. It features an **algorithmic geospatial matching engine**, an **authoritative dynamic market pricing engine**, **Mapbox GL JS route visualization**, **Razorpay sandbox payments**, and **atomic transactional seat allocation** backed by Supabase PostgreSQL and FastAPI.
 
 ---
 
-## 🌟 Key Highlights & Capabilities
+## 📑 Table of Contents
 
-### 🗺️ Phase 3A: Real Mapbox Location & Route Visualization
-- **Live Autocomplete Search**: Integrated Mapbox Places Geocoding v5 API for real cities, airports, tech parks, college campuses, and addresses (e.g., *Koramangala, Bengaluru* → *Hitech City, Hyderabad*).
-- **Interactive Route Visualization**: Mapbox GL JS light styling with dynamic driving directions, turn geometry, distance calculation (km), and travel duration pills.
-- **Custom Location Markers**: High-contrast Emerald (`A` origin) and Rose (`B` destination) pins with animated fit-bounds camera framing.
-- **Resilient Fallback**: Graceful offline/legacy trip handling for historical records lacking geographic coordinates.
+- [Architectural Overview](#-architectural-overview)
+- [Key Engineering Highlights](#-key-engineering-highlights)
+  - [Dynamic Market Pricing Engine (Phase 5)](#1-dynamic-market-pricing-engine)
+  - [Automatic Geospatial Matching Engine (Phase 4)](#2-automatic-geospatial-matching-engine)
+  - [Razorpay Payment Subsystem (Phase 3B & 3C)](#3-razorpay-payment-subsystem)
+  - [Mapbox Integration & API Quota Preservation (Phase 3A)](#4-mapbox-integration--api-quota-preservation)
+- [Technology Stack](#-technology-stack)
+- [Database Schema & Migrations](#-database-schema--migrations)
+- [API Reference](#-api-reference)
+- [Getting Started & Local Setup](#-getting-started--local-setup)
+- [Running Automated Tests](#-running-automated-tests)
+- [License](#-license)
 
-### 🚙 Ride Publishing & Search
-- **Driver Trip Publishing**: Dynamic departure/arrival scheduling, seat counts, luggage allowance tiers, vehicle association, and custom trip rules.
-- **Smart Filter & Discovery**: Instant booking filters, price ceiling sliders, time windows (Morning/Afternoon/Evening), verified driver badges, and sorting (Cheapest, Earliest, Highest Rated).
-- **Atomic Concurrency Booking**: Real seat reservation backed by transactional locking and Supabase PostgreSQL RPCs to eliminate double-booking race conditions.
+---
 
-### 👥 Passenger Requests & 📦 Luggage Logistics
-- **Passenger Requests**: Travelers broadcast desired travel corridors with custom budgets and preferences, enabling drivers to offer seats directly.
-- **P2P Luggage Corridors**: Peer-to-peer delivery for documents and parcel packages (<5kg, <15kg, <25kg) with verified drivers traveling along the route.
+## 🏛️ Architectural Overview
 
-### 💬 Real-Time Chat & Notifications
-- In-app messaging between passengers and drivers with unread counters and Supabase Realtime synchronization.
-- Status notifications for trip publishing, confirmations, seat locks, and cancellations.
+```text
+                                  React 19 + TypeScript (Vite + Tailwind CSS)
+                                                      │
+                       ┌──────────────────────────────┼──────────────────────────────┐
+                       ▼                              ▼                              ▼
+                 Mapbox GL JS               FastAPI Python Backend             Razorpay Checkout
+           (Geocoding & Directions)          (Async REST Endpoints)           (Web Sandbox Modal)
+                       │                              │                              │
+                       │             ┌────────────────┴────────────────┐             │
+                       │             ▼                                 ▼             │
+                       │      Matching Engine               Dynamic Pricing Engine   │
+                       │    (Geospatial Ranking)         (Multipliers, Floor/Cap)   │
+                       │             │                                 │             │
+                       └─────────────┼─────────────────────────────────┼─────────────┘
+                                     ▼                                 ▼
+                                       Supabase PostgreSQL Database
+                                (Row Level Security, RPCs, Auth, Realtime)
+```
 
-### 🛡️ Trust & Verification
-- Supabase Authentication (JWT Bearer tokens & RLS policies).
-- Multi-tier identity checks: Govt ID verification and Student Verification (.edu / verified college domains).
+---
+
+## 🌟 Key Engineering Highlights
+
+### 1. Dynamic Market Pricing Engine
+The platform calculates deterministic, fair, and surge-protected prices for every corridor:
+- **Platform Base Corridor Pricing**: Derived from fundamental route economics $(\text{Distance} \times ₹1.00 + \text{Duration} \times ₹0.15) \times \text{Vehicle Factor}$ using verified NHAI corridor benchmarks (e.g., NH44 Bengaluru–Hyderabad: 560 km, NH48 Bengaluru–Chennai: 345 km).
+- **Continuous Demand/Supply Ratio (DSR)**: Continuous, monotonic multiplier strictly bounded to $[0.90, 1.30]$.
+- **Time-to-Departure Urgency**: Linear urgency ramp for departure $< 24\text{ hours}$. High demand routes receive slight urgency lift ($1.00 - 1.06\times$), while low-demand routes receive an incentive discount ($0.95\times$) to fill empty seats.
+- **Controlled Occupancy**: Quadratic curve factoring booked seats vs vehicle capacity, strictly bounded to $[1.00, 1.05\times]$.
+- **Hard Price Floor & Ceiling Guardrails**: Enforces $\text{Floor} = \max(₹150, 0.85 \times \text{Base Price})$ and $\text{Ceiling} = 1.30 \times \text{Base Price}$ post-multiplier and currency rounding (nearest ₹10).
+- **Guaranteed Booking Price Immutability**:
+  $$\text{current\_market\_price} \longrightarrow \text{booking.price\_at\_booking} \longrightarrow \text{Razorpay order amount}$$
+  Once booked, the price is permanently frozen on the booking record. Subsequent market surges or occupancy shifts cannot alter the customer's checkout total.
+- **Anti-Arbitrary Driver Pricing**: Backend automatically rejects/overrides arbitrary prices (e.g. ₹1 or ₹10,000) with authoritative platform calculations.
+- **Event-Driven Cache Invalidation**: In-memory 5-minute corridor pricing cache is invalidated on lifecycle events (`trip created/cancelled`, `booking created/cancelled`, `request created/cancelled`). Zero polling.
+
+---
+
+### 2. Automatic Geospatial Matching Engine
+- **Spatial Pre-filtering**: Haversine circular proximity screening ($\le 25\text{ km}$ pickup radius, $\le 30\text{ km}$ destination radius) pre-filters hundreds of candidate trips before multi-objective evaluation.
+- **Multi-Objective Scoring**:
+  $$\text{Total Score} = 0.35 \times S_{\text{route}} + 0.25 \times S_{\text{time}} + 0.20 \times S_{\text{price}} + 0.15 \times S_{\text{rating}} + 0.05 \times S_{\text{vehicle}}$$
+- **Deterministic Tie-Breaking**: Breaks score ties deterministically by earliest departure time, highest driver trips count, lowest seat price, and UUID lexicographical ordering.
+- **Transactional Seat Allocation**: Atomically decrements seat inventory via Supabase PostgreSQL RPC `book_trip_seats` to eliminate race conditions under concurrent booking requests.
+
+---
+
+### 3. Razorpay Payment Subsystem
+- **Order Generation**: Server-side calculation generates official Razorpay test orders with unique receipts.
+- **HMAC-SHA256 Signature Verification**: Cryptographically verifies `razorpay_signature` using backend secrets:
+  $$\text{HMAC-SHA256}(\text{order\_id} + "|" + \text{payment\_id}, \text{secret})$$
+- **Idempotency & Replay Protection**: In-memory caching and PostgreSQL state checks prevent duplicate order creation on repeated button clicks.
+- **409 Conflict vs Payment Decline Separation**: UI explicitly distinguishes concurrent seat reservation conflicts (HTTP 409) from genuine payment card declines.
+
+---
+
+### 4. Mapbox Integration & API Quota Preservation
+- **Geocoding Autocomplete**: Real-time address lookups via Mapbox Geocoding v5 API with client-side debouncing.
+- **Route Visualization**: Turn-by-turn driving polyline rendering with custom emerald (origin) and rose (destination) pins.
+- **API Conservation Guarantee**: Exactly **0 Mapbox calls** inside scoring loops, candidate ranking, and dynamic pricing calculations. Coordinates and distances stored in PostgreSQL are reused unconditionally.
 
 ---
 
@@ -37,41 +92,71 @@ TopRide connects commuters, travelers, and students heading in the same directio
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 19, TypeScript, Vite 8, Tailwind CSS v4, Lucide React |
-| **Maps & Routing** | Mapbox GL JS (v3.32), Mapbox Geocoding Places API, Mapbox Directions API |
+| **Frontend** | React 19, TypeScript 5, Vite 8, Tailwind CSS v4, Lucide React |
 | **Backend** | FastAPI, Python 3.13, Pydantic v2, Uvicorn |
-| **Database & Auth** | Supabase PostgreSQL, Supabase Auth, Row Level Security (RLS), Supabase Realtime |
+| **Database & Auth** | Supabase PostgreSQL, Row Level Security (RLS), Supabase Auth (JWT), Realtime |
+| **Maps & Routing** | Mapbox GL JS v3, Mapbox Geocoding API, Mapbox Directions API |
+| **Payments** | Razorpay Node/Python SDK, Razorpay Checkout Web Modal (Test Mode) |
+| **Testing** | Pytest, AnyIO, TypeScript Compiler (`tsc`), Vitest |
 
 ---
 
-## 📐 Architecture Overview
+## 🗄️ Database Schema & Migrations
 
-```text
-               React 19 + TypeScript (Vite + Tailwind CSS)
-                                   │
-                 ┌─────────────────┴─────────────────┐
-                 ▼                                   ▼
-        Mapbox Web Services                  FastAPI Backend (Python)
-      (Places & Directions API)              (REST Endpoints & Validation)
-                                                     │
-                                                     ▼
-                                          Supabase PostgreSQL
-                                     (Auth, RLS, Storage, Realtime)
-```
+All migrations are located in the project root and are ready to be run in the Supabase SQL editor:
+
+| File | Purpose |
+| :--- | :--- |
+| `phase3b_razorpay_migration.sql` | Creates `payment_orders` table, idempotency columns, and payment state tracking. |
+| `phase3c_payment_verification_migration.sql` | Adds Razorpay verification columns, payment audit triggers, and receipt storage. |
+| `phase4_matching_migration.sql` | Adds geospatial coordinate indexing, passenger request routing metadata, and auto-match logs. |
+| `phase5_dynamic_pricing_migration.sql` | Adds `current_market_price`, `base_price`, `pricing_metadata`, `price_at_booking`, and `price_history` audit table. |
 
 ---
 
-## 🚀 Quickstart & Local Setup
+## 🔌 API Reference
+
+### Dynamic Pricing
+- `POST /api/pricing/estimate` — Calculate dynamic market price breakdown for a route.
+  ```json
+  {
+    "origin": "Bengaluru",
+    "destination": "Hyderabad",
+    "travelDate": "2026-10-17",
+    "departureTime": "08:00",
+    "originLat": 12.9716,
+    "originLon": 77.5946,
+    "destLat": 17.3850,
+    "destLon": 78.4867,
+    "totalSeats": 3,
+    "availableSeats": 3,
+    "vehicleCategory": "sedan"
+  }
+  ```
+
+### Automatic Matching
+- `POST /api/matching/find` — Search and rank compatible driver trips for a passenger request.
+- `POST /api/matching/assign` — Automatically assign and reserve seats with atomic rollback guarantee.
+
+### Razorpay Payments
+- `POST /api/payments/razorpay-order` — Create authoritative Razorpay test order.
+- `POST /api/payments/verify` — Verify cryptographic HMAC-SHA256 signature and confirm booking.
+- `POST /api/payments/order-status` — Update payment order lifecycle status (`paid`, `failed`, `cancelled`).
+
+---
+
+## 🚀 Getting Started & Local Setup
 
 ### Prerequisites
 - **Node.js**: v18+ (Node 20+ recommended)
-- **Python**: v3.10+ (Python 3.13 supported)
+- **Python**: v3.10+ (Python 3.13 recommended)
+- **Supabase Account**: Project URL & Anon Key
 - **Mapbox Account**: Public Access Token (`pk.eyJ1...`)
-- **Supabase Project**: Project URL & Anon Key
+- **Razorpay Account**: Test Key ID & Key Secret (`rzp_test_...`)
 
 ---
 
-### 1. Clone & Install Dependencies
+### 1. Installation
 
 ```bash
 # Clone the repository
@@ -82,114 +167,60 @@ cd TopRide
 npm install
 
 # Install backend dependencies
-pip install fastapi uvicorn supabase python-dotenv pydantic requests
+pip install fastapi uvicorn supabase python-dotenv pydantic requests razorpay pytest
 ```
 
 ---
 
-### 2. Configure Environment Variables
+### 2. Environment Configuration
 
-Create a `.env` file in the project root (see `.env.example`):
+Create a `.env` file in the root directory:
 
 ```env
-# Frontend Configuration
+# Frontend Variables (Vite)
 VITE_SUPABASE_URL=https://<your-project-id>.supabase.co
 VITE_SUPABASE_ANON_KEY=<your-supabase-anon-key>
 VITE_API_URL=http://localhost:8000
-VITE_MAPBOX_ACCESS_TOKEN=<your-mapbox-public-access-token>
+VITE_MAPBOX_ACCESS_TOKEN=<your-mapbox-public-token>
+VITE_RAZORPAY_KEY_ID=<your-razorpay-test-key-id>
 
-# Backend Configuration (FastAPI)
+# Backend Variables (FastAPI)
 SUPABASE_URL=https://<your-project-id>.supabase.co
-SUPABASE_KEY=<your-supabase-anon-key>
-SUPABASE_SERVICE_ROLE_KEY=
-PORT=8000
-MAPBOX_ACCESS_TOKEN=<your-mapbox-public-access-token>
+SUPABASE_KEY=<your-supabase-service-or-anon-key>
+MAPBOX_ACCESS_TOKEN=<your-mapbox-secret-or-public-token>
+RAZORPAY_KEY_ID=<your-razorpay-test-key-id>
+RAZORPAY_KEY_SECRET=<your-razorpay-test-key-secret>
 ```
 
 ---
 
-### 3. Database Migration
-
-Run the migration script in your **Supabase Dashboard > SQL Editor**:
-- Open [phase3a_mapbox_migration.sql](phase3a_mapbox_migration.sql)
-- Execute the SQL script to create the spatial coordinates columns (`origin_latitude`, `destination_latitude`, etc.) and performance indexes.
-
----
-
-### 4. Run the Application
-
-Start the backend and frontend dev servers:
+### 3. Run Development Servers
 
 ```bash
-# Terminal 1: Start FastAPI Backend
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+# Start FastAPI backend (Terminal 1)
+python -m uvicorn backend.main:app --port 8000 --host 127.0.0.1 --reload
 
-# Terminal 2: Start Vite Frontend
+# Start Vite frontend (Terminal 2)
 npm run dev
 ```
 
-The application will be live at:
-- **Frontend App**: [http://localhost:5173/](http://localhost:5173/)
-- **FastAPI API**: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- **Swagger Documentation**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+Visit `http://localhost:5173` to explore the application.
 
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Running Automated Tests
+
+TopRide includes a test suite covering matching math, dynamic pricing guardrails, and quota safety:
 
 ```bash
-# Type check frontend code
-npx tsc --noEmit
+# Run dynamic pricing, automatic matching, and API safety tests
+python -m pytest backend/test_dynamic_pricing.py backend/test_automatic_matching.py backend/test_api_quota_safety.py -v
 
-# Production bundle build
+# Run frontend TypeScript type checking
+npx tsc -b --noEmit
+
+# Run production frontend build
 npm run build
-
-# Run Phase 3A Mapbox automated verification test
-python -m backend.test_phase3a_mapbox
-
-# Run Arjun & Saket multi-user regression flow
-python -m backend.test_arjun_saket_mandatory
-```
-
----
-
-## 📂 Project Structure
-
-```text
-TopRide/
-├── backend/
-│   ├── config.py                     # Environment variables & Supabase config
-│   ├── database.py                   # Data access layer, Supabase clients & RPCs
-│   ├── main.py                       # FastAPI application & REST routes
-│   ├── schemas.py                    # Pydantic v2 schemas & request validation
-│   └── test_phase3a_mapbox.py        # Automated test suite for Mapbox coordinates
-├── src/
-│   ├── components/
-│   │   ├── LocationSearchInput.tsx   # Mapbox places autocomplete component
-│   │   ├── MapRoutePreview.tsx       # Mapbox GL route visualizer & marker component
-│   │   ├── MapPreview.tsx            # Route map wrapper
-│   │   ├── Navbar.tsx                # Responsive top navigation & profile badge
-│   │   └── BottomNav.tsx             # Mobile navigation bar
-│   ├── services/
-│   │   └── mapbox.ts                 # Mapbox API service (Geocoding & Directions)
-│   ├── views/
-│   │   ├── FindView.tsx              # Ride discovery & corridor search view
-│   │   ├── PostTripView.tsx          # Driver trip publisher with live map preview
-│   │   ├── TripDetailsView.tsx       # Detailed itinerary with Mapbox map & route
-│   │   ├── BookingFlow.tsx           # Multi-step checkout & seat booking
-│   │   ├── PostRequestView.tsx       # Passenger ride request view
-│   │   ├── LuggageFlow.tsx           # P2P luggage delivery matching flow
-│   │   ├── TripsView.tsx             # My Trips & shipments management
-│   │   ├── InboxView.tsx             # Real-time passenger-driver chat
-│   │   └── AccountView.tsx           # Vehicles, verification & user profile
-│   ├── api.ts                        # Frontend HTTP API service & Supabase client
-│   ├── types.ts                      # Shared TypeScript data models
-│   ├── App.tsx                       # Main application state & screen routing
-│   └── index.css                     # Design tokens & Tailwind CSS v4 setup
-├── phase3a_mapbox_migration.sql      # Database migration script for coordinates
-├── package.json                      # Project dependencies & scripts
-├── vite.config.ts                    # Vite bundler configuration
-└── README.md                         # Project documentation
 ```
 
 ---

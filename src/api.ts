@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { 
   User, Vehicle, Trip, PassengerRequest, LuggagePackage, 
-  Conversation, Message, NotificationItem, UniversityOption 
+  Conversation, Message, NotificationItem, UniversityOption, PaymentOrderResponse, PaymentVerifyResponse,
+  MatchingResponse, AssignmentRequest, AssignmentResponse,
+  PriceBreakdown, PriceEstimateRequest
 } from './types';
 
 // Supabase Client Initialization
@@ -38,7 +40,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const errorBody = await res.json().catch(() => ({ detail: res.statusText }));
     const errorDetail = errorBody.detail || JSON.stringify(errorBody);
     console.error(`[TopRide API Error] HTTP ${res.status} | Endpoint: ${options.method || 'GET'} ${endpoint} | Body:`, errorBody);
-    throw new Error(`[${res.status}] ${endpoint}: ${errorDetail}`);
+    const err: any = new Error(typeof errorDetail === 'string' ? errorDetail : `[${res.status}] ${endpoint}: ${JSON.stringify(errorDetail)}`);
+    err.status = res.status;
+    err.detail = errorDetail;
+    throw err;
   }
   return res.json();
 }
@@ -184,10 +189,52 @@ export const api = {
     passengerNotes?: string;
     totalAmount: number;
     selectedSeatNumbers?: number[];
-  }): Promise<{ id: string; bookingRef: string; trip?: Trip }> {
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
+  }): Promise<{ id: string; bookingRef: string; trip?: Trip; razorpayOrderId?: string; razorpayPaymentId?: string }> {
     return request('/api/bookings', {
       method: 'POST',
       body: JSON.stringify(bookingData),
+    });
+  },
+
+  // Razorpay Test Mode Payment API
+  async createRazorpayOrder(data: {
+    tripId: string;
+    seatsCount: number;
+    luggageTier?: string;
+  }): Promise<PaymentOrderResponse> {
+    return request<PaymentOrderResponse>('/api/payments/razorpay/order', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async verifyRazorpayPayment(data: {
+    tripId: string;
+    seatsCount: number;
+    luggageTier?: string;
+    passengerNotes?: string;
+    razorpayOrderId: string;
+    razorpayPaymentId: string;
+    razorpaySignature: string;
+  }): Promise<PaymentVerifyResponse> {
+    return request<PaymentVerifyResponse>('/api/payments/razorpay/verify', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async recordPaymentStatus(data: {
+    orderId: string;
+    status: 'paid' | 'failed' | 'cancelled';
+    paymentId?: string;
+    reason?: string;
+  }): Promise<{ success: boolean }> {
+    return request<{ success: boolean }>('/api/payments/razorpay/record-status', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   },
 
@@ -318,6 +365,42 @@ export const api = {
     return request<any[]>('/api/support/tickets');
   },
 
+  // Automatic Matching & Assignment Engine
+  async findMatches(params: {
+    origin: string | any;
+    destination: string | any;
+    date: string;
+    departure_time?: string;
+    seats?: number;
+    budget?: number;
+    vehicle_preference?: string;
+    origin_latitude?: number;
+    origin_longitude?: number;
+    destination_latitude?: number;
+    destination_longitude?: number;
+    preferences?: string[];
+  }): Promise<MatchingResponse> {
+    return request<MatchingResponse>('/api/matching/find', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async autoAssignTrip(params: AssignmentRequest): Promise<AssignmentResponse> {
+    return request<AssignmentResponse>('/api/matching/assign', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  // Dynamic Market Pricing
+  async estimatePricing(params: PriceEstimateRequest): Promise<PriceBreakdown> {
+    return request<PriceBreakdown>('/api/pricing/estimate', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
   // Payouts
   async requestPayout(amount: number, method: 'bank' | 'upi'): Promise<{ success: boolean; remainingPayout: number }> {
     return request('/api/payments/payout', {
@@ -326,3 +409,4 @@ export const api = {
     });
   },
 };
+

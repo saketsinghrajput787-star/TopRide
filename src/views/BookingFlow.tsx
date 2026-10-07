@@ -1,21 +1,19 @@
 import React, { useState } from 'react';
-import { Trip, User, ScreenId } from '../types';
+import { Trip, User, ScreenId, PaymentOrderResponse } from '../types';
 import { 
   ArrowLeft, 
   ArrowRight, 
   Check, 
-  CreditCard, 
   Luggage, 
   ShieldCheck, 
   AlertCircle, 
-  Sparkles,
-  Smartphone,
-  Building2,
-  Lock,
-  Download,
-  MessageSquare
+  Lock, 
+  MessageSquare,
+  RotateCcw,
+  Info,
+  Receipt,
+  Users
 } from 'lucide-react';
-
 import { api } from '../api';
 
 interface BookingFlowProps {
@@ -26,6 +24,32 @@ interface BookingFlowProps {
   onOpenChat: (driverId: string, driverName: string) => void;
   showToast: (msg: string) => void;
 }
+
+type PaymentError = 
+  | { type: 'none'; message?: string }
+  | { type: 'seat_conflict'; message: string }
+  | { type: 'payment_failed'; message: string }
+  | { type: 'verification_failed'; message: string }
+  | { type: 'checkout_cancelled'; message: string }
+  | { type: 'driver_self_booking'; message: string }
+  | { type: 'generic'; message: string };
+
+type ActivePaymentError = Exclude<PaymentError, { type: 'none' }>;
+
+// Ensure Razorpay web checkout script is loaded
+const ensureRazorpayLoaded = (): Promise<boolean> => {
+  if (typeof window !== 'undefined' && (window as any).Razorpay) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 export const BookingFlow: React.FC<BookingFlowProps> = ({
   trip,
@@ -43,15 +67,16 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const [luggageTier, setLuggageTier] = useState<'small' | 'medium' | 'heavy'>('small');
   const [passengerNotes, setPassengerNotes] = useState<string>('');
   
-  // Payment states (Mock Razorpay)
-  const [paymentTab, setPaymentTab] = useState<'upi' | 'card' | 'netbanking'>('upi');
-  const [upiId, setUpiId] = useState('demo@okhdfcbank');
-  const [cardNumber, setCardNumber] = useState('4532 •••• •••• 8912');
-  const [cardExpiry, setCardExpiry] = useState('08/28');
-  const [cardCvv, setCardCvv] = useState('•••');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentFailed, setPaymentFailed] = useState(false);
-  const [bookingRef, setBookingRef] = useState('TR-90421');
+  // Payment states (Razorpay Test Mode)
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [paymentError, setPaymentError] = useState<PaymentError>({ type: 'none' });
+  const [checkoutDismissed, setCheckoutDismissed] = useState<boolean>(false);
+  const [bookingRef, setBookingRef] = useState<string>('TR-90421');
+  const [lastOrderId, setLastOrderId] = useState<string>('');
+  const [lastPaymentId, setLastPaymentId] = useState<string>('');
+
+  // Cache existing created order to prevent duplicate Razorpay order creations on repeated clicks
+  const [activeOrder, setActiveOrder] = useState<PaymentOrderResponse | null>(null);
 
   // Calculations
   const seatFare = trip.pricePerSeat * selectedSeatCount;
@@ -59,36 +84,220 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const platformFee = 0; // TopRide promo: 0 fee
   const totalAmount = seatFare + luggageFee + platformFee;
 
-  const handleProcessPayment = async (simulateFailure = false) => {
-    setIsProcessing(true);
-    setPaymentFailed(false);
+  // Categorize errors cleanly to distinguish seat conflicts (409) from Razorpay failures
+  const categorizeError = (err: any): ActivePaymentError => {
+    const status = err?.status;
+    const msg = String(err?.message || err?.detail || '');
+    
+    // Seat conflict: 409 or explicit seats availability message
+    if (
+      status === 409 || 
+      msg.includes('409') || 
+      msg.toLowerCase().includes('seats unavailable') || 
+      msg.toLowerCase().includes('not enough seats') || 
+      msg.toLowerCase().includes('no longer available') ||
+      msg.toLowerCase().includes('already booked')
+    ) {
+      return {
+        type: 'seat_conflict',
+        message: 'These seats are no longer available.',
+      };
+    }
 
-    if (simulateFailure) {
-      setTimeout(() => {
-        setIsProcessing(false);
-        setPaymentFailed(true);
-        showToast('Payment simulation failed — please try again');
-      }, 1000);
+    // Driver self-booking
+    if (
+      msg.toLowerCase().includes('drivers cannot book') || 
+      msg.toLowerCase().includes('own trip')
+    ) {
+      return {
+        type: 'driver_self_booking',
+        message: 'Drivers cannot book their own trip.',
+      };
+    }
+
+    // Signature verification failure
+    if (
+      msg.toLowerCase().includes('verification failed') ||
+      msg.toLowerCase().includes('signature')
+    ) {
+      return {
+        type: 'verification_failed',
+        message: 'Payment verification failed. Please try again.',
+      };
+    }
+
+    // Payment failed or declined
+    if (
+      msg.toLowerCase().includes('payment failed') ||
+      msg.toLowerCase().includes('declined')
+    ) {
+      return {
+        type: 'payment_failed',
+        message: 'Payment failed or was declined. Please try again.',
+      };
+    }
+
+    // Generic API or network error
+    return {
+      type: 'generic',
+      message: typeof err?.detail === 'string' ? err.detail : msg || 'Unable to proceed with checkout. Please try again.',
+    };
+  };
+
+  // Launch official Razorpay web checkout modal
+  const handleLaunchRazorpayCheckout = async () => {
+    // 1. Client-side self-booking validation
+    if (currentUser.id === trip.driverId) {
+      const errState: PaymentError = {
+        type: 'driver_self_booking',
+        message: 'Drivers cannot book their own trip.',
+      };
+      setPaymentError(errState);
+      showToast('Drivers cannot book their own trip.');
       return;
     }
 
+    // 2. Client-side seat availability validation
+    if (trip.availableSeats < selectedSeatCount) {
+      const errState: PaymentError = {
+        type: 'seat_conflict',
+        message: 'These seats are no longer available. Please select another seat.',
+      };
+      setPaymentError(errState);
+      showToast('These seats are no longer available. Please select another seat.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setPaymentError({ type: 'none' });
+    setCheckoutDismissed(false);
+
     try {
-      const res = await api.createBooking({
-        tripId: trip.id,
-        seatsCount: selectedSeatCount,
-        luggageTier,
-        passengerNotes,
-        totalAmount,
+      // 3. Ensure Razorpay Checkout SDK is ready
+      const isLoaded = await ensureRazorpayLoaded();
+      if (!isLoaded || !(window as any).Razorpay) {
+        throw new Error('Razorpay Checkout SDK failed to load. Please verify your connection.');
+      }
+
+      // 4. Retrieve or create authentic Razorpay TEST order (prevents duplicate orders on repeated clicks)
+      let orderData: PaymentOrderResponse;
+      if (
+        activeOrder && 
+        activeOrder.tripId === trip.id && 
+        activeOrder.seatsCount === selectedSeatCount &&
+        activeOrder.amountRupees === totalAmount
+      ) {
+        orderData = activeOrder;
+      } else {
+        orderData = await api.createRazorpayOrder({
+          tripId: trip.id,
+          seatsCount: selectedSeatCount,
+          luggageTier,
+        });
+        setActiveOrder(orderData);
+      }
+
+      setLastOrderId(orderData.orderId);
+
+      // 5. Configure Razorpay Checkout options
+      const keyId = orderData.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TkWmgK8HUmJJGn';
+
+      const options = {
+        key: keyId,
+        amount: orderData.amount, // in paise
+        currency: orderData.currency || 'INR',
+        name: 'TopRide',
+        description: `${trip.origin} → ${trip.destination} (${selectedSeatCount} ${selectedSeatCount === 1 ? 'seat' : 'seats'})`,
+        order_id: orderData.orderId,
+        prefill: {
+          name: currentUser.name || 'TopRide Member',
+          email: currentUser.email || 'passenger@topride.app',
+          contact: currentUser.phone || '+919876543210',
+        },
+        theme: {
+          color: '#020617', // Slate 950
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessing(false);
+            setCheckoutDismissed(true);
+            setPaymentError({
+              type: 'checkout_cancelled',
+              message: 'Payment checkout was cancelled.',
+            });
+            showToast('Payment checkout was cancelled.');
+            api.recordPaymentStatus({
+              orderId: orderData.orderId,
+              status: 'cancelled',
+              reason: 'User closed Razorpay modal',
+            }).catch(() => {});
+          },
+          confirm_close: true,
+        },
+        handler: async (resp: {
+          razorpay_payment_id: string;
+          razorpay_order_id: string;
+          razorpay_signature?: string;
+        }) => {
+          setIsProcessing(true);
+          const paymentId = resp.razorpay_payment_id;
+          const orderId = resp.razorpay_order_id || orderData.orderId;
+          const signature = resp.razorpay_signature || '';
+          setLastPaymentId(paymentId);
+          setLastOrderId(orderId);
+
+          try {
+            // 6. Authoritative backend signature verification & atomic booking
+            const verifyResult = await api.verifyRazorpayPayment({
+              tripId: trip.id,
+              seatsCount: selectedSeatCount,
+              luggageTier,
+              passengerNotes,
+              razorpayOrderId: orderId,
+              razorpayPaymentId: paymentId,
+              razorpaySignature: signature,
+            });
+
+            const confirmedBooking = verifyResult.booking;
+            setActiveOrder(null);
+            setBookingRef(confirmedBooking.bookingRef);
+            setIsProcessing(false);
+            setStep('confirmed');
+            onConfirmBooking(confirmedBooking.trip || trip, selectedSeatCount, orderData.amountRupees);
+            showToast('Payment verified successfully! Booking confirmed.');
+          } catch (bookErr: any) {
+            setIsProcessing(false);
+            const classifiedError = categorizeError(bookErr);
+            setPaymentError(classifiedError);
+            showToast(classifiedError.message);
+          }
+        },
+      };
+
+      const rzpInstance = new (window as any).Razorpay(options);
+      rzpInstance.on('payment.failed', (failResp: any) => {
+        setIsProcessing(false);
+        // Genuine Razorpay payment failure
+        setPaymentError({
+          type: 'payment_failed',
+          message: 'Payment failed or was declined. Please try again.',
+        });
+        showToast('Payment failed or was declined. Please try again.');
+        api.recordPaymentStatus({
+          orderId: orderData.orderId,
+          status: 'failed',
+          paymentId: failResp?.error?.metadata?.payment_id,
+          reason: failResp?.error?.description || 'Payment declined in Razorpay Test Mode',
+        }).catch(() => {});
       });
-      setBookingRef(res.bookingRef);
-      setIsProcessing(false);
-      setStep('confirmed');
-      onConfirmBooking(res.trip || trip, selectedSeatCount, totalAmount);
-      showToast('Payment successful! Booking confirmed.');
+
+      // Open official Razorpay Checkout modal
+      rzpInstance.open();
     } catch (err: any) {
       setIsProcessing(false);
-      const errMsg = err?.message || 'Booking failed. Please try again.';
-      showToast(errMsg);
+      const classifiedError = categorizeError(err);
+      setPaymentError(classifiedError);
+      showToast(classifiedError.message);
     }
   };
 
@@ -117,11 +326,14 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               How many seats do you need?
             </h2>
             <div className="grid grid-cols-4 gap-3">
-              {[1, 2, 3, 4].slice(0, trip.availableSeats).map((count) => (
+              {[1, 2, 3, 4].slice(0, trip.availableSeats || 1).map((count) => (
                 <button
                   key={count}
                   type="button"
-                  onClick={() => setSelectedSeatCount(count)}
+                  onClick={() => {
+                    setSelectedSeatCount(count);
+                    setActiveOrder(null); // Invalidate cached order for new seat count
+                  }}
                   className={`py-4 px-3 rounded-2xl border-2 text-center transition-all cursor-pointer ${
                     selectedSeatCount === count
                       ? 'border-slate-950 bg-slate-50 font-black text-slate-950 shadow-xs'
@@ -135,7 +347,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
             </div>
           </div>
 
-          {/* Interactive Car Seating Layout Visualization */}
+          {/* Vehicle Cabin Layout */}
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
             <span className="text-xs font-bold text-slate-600 block mb-3">Vehicle Cabin Layout</span>
             <div className="max-w-xs mx-auto border-2 border-dashed border-slate-300 rounded-3xl p-4 bg-white space-y-4">
@@ -143,7 +355,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               <div className="flex justify-between items-center px-4">
                 <div className="w-12 h-12 rounded-xl bg-slate-900 text-white text-[10px] font-bold flex flex-col items-center justify-center">
                   <span>Driver</span>
-                  <span className="text-[8px] text-slate-400">Arjun</span>
+                  <span className="text-[8px] text-slate-400">{trip.driverName.split(' ')[0]}</span>
                 </div>
                 <div className="w-12 h-12 rounded-xl border-2 border-dashed border-slate-300 text-slate-400 text-[10px] font-bold flex items-center justify-center">
                   Empty
@@ -172,7 +384,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
             </h2>
             <div className="space-y-3">
               <label
-                onClick={() => setLuggageTier('small')}
+                onClick={() => {
+                  setLuggageTier('small');
+                  setActiveOrder(null);
+                }}
                 className={`p-4 rounded-2xl border-2 flex items-center justify-between cursor-pointer transition-all ${
                   luggageTier === 'small' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'
                 }`}
@@ -190,7 +405,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               </label>
 
               <label
-                onClick={() => setLuggageTier('medium')}
+                onClick={() => {
+                  setLuggageTier('medium');
+                  setActiveOrder(null);
+                }}
                 className={`p-4 rounded-2xl border-2 flex items-center justify-between cursor-pointer transition-all ${
                   luggageTier === 'medium' ? 'border-slate-950 bg-slate-50' : 'border-slate-200 hover:border-slate-300'
                 }`}
@@ -241,32 +459,35 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
     );
   }
 
-  // ================= STEP 2: REVIEW & MOCK RAZORPAY PAYMENT =================
+  // ================= STEP 2: REVIEW & RAZORPAY TEST MODE CHECKOUT =================
   if (step === 'checkout') {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setStep('selection')}
+            onClick={() => {
+              setStep('selection');
+              setPaymentError({ type: 'none' });
+            }}
             className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 hover:bg-slate-200 cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-950">Review & Pay</h1>
-            <p className="text-xs text-slate-500">Secure checkout via Razorpay</p>
+            <p className="text-xs text-slate-500">Official Razorpay Test Mode Checkout</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-          {/* LEFT: PAYMENT METHODS (col 7) */}
+          {/* LEFT: RAZORPAY TEST CHECKOUT PANEL (col 7) */}
           <div className="md:col-span-7 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-5">
             {/* Razorpay Banner */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <span className="font-black text-sm text-slate-900 tracking-tight">TopRide Checkout</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-bold border border-blue-200">
-                  Razorpay Sandbox
+                  Razorpay Test Mode
                 </span>
               </div>
               <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
@@ -275,163 +496,178 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               </div>
             </div>
 
-            {/* Payment Method Selector Tabs */}
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setPaymentTab('upi')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  paymentTab === 'upi' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                UPI (GPay / PhonePe)
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentTab('card')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  paymentTab === 'card' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Cards
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentTab('netbanking')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  paymentTab === 'netbanking' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Netbanking
-              </button>
+            {/* Test Mode Instructions Card */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-xs">
+                <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Sandbox Test Payment Information</span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Clicking the button below opens the official <strong>Razorpay Test Checkout</strong> modal. 
+                You can simulate successful or failed payments using test UPI apps, test Netbanking, or cards without any real money charges.
+              </p>
             </div>
 
-            {/* TAB CONTENT: UPI */}
-            {paymentTab === 'upi' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {['Google Pay', 'PhonePe', 'Paytm'].map((app) => (
-                    <button
-                      key={app}
-                      type="button"
-                      onClick={() => setUpiId(`${app.toLowerCase().replace(' ', '')}@okaxis`)}
-                      className="p-3 border border-slate-200 rounded-xl text-center hover:bg-slate-50 text-xs font-bold text-slate-800 cursor-pointer"
-                    >
-                      <Smartphone className="w-4 h-4 mx-auto mb-1 text-slate-700" />
-                      <span>{app}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Or enter UPI VPA / ID
-                  </label>
-                  <input
-                    type="text"
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-hidden focus:border-slate-950"
-                    placeholder="username@okhdfcbank"
-                  />
-                </div>
+            {/* Price breakdown inside checkout */}
+            <div className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-600">
+                <span>Trip Route</span>
+                <span className="font-bold text-slate-900">{trip.origin} → {trip.destination}</span>
               </div>
-            )}
-
-            {/* TAB CONTENT: CARDS */}
-            {paymentTab === 'card' && (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Card Number (Demo)
-                  </label>
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-hidden"
-                  />
+              <div className="flex justify-between text-slate-600">
+                <span>Selected Seats</span>
+                <span className="font-bold text-slate-900">{selectedSeatCount} {selectedSeatCount === 1 ? 'seat' : 'seats'}</span>
+              </div>
+              <div className="flex justify-between text-slate-600 items-center">
+                <span>Price Per Seat</span>
+                <span className="font-bold text-slate-950 flex items-center gap-1.5">
+                  ₹{trip.pricePerSeat}
+                  {trip.pricingMetadata?.demandMultiplier && trip.pricingMetadata.demandMultiplier > 1.05 && (
+                    <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full font-medium">
+                      High demand
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Fare ({selectedSeatCount} × ₹{trip.pricePerSeat})</span>
+                <span className="font-bold text-slate-900">₹{seatFare}</span>
+              </div>
+              {luggageFee > 0 && (
+                <div className="flex justify-between text-slate-600">
+                  <span>Luggage ({luggageTier})</span>
+                  <span className="font-bold text-slate-900">₹{luggageFee}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+              )}
+              <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-950">
+                <span>Total Amount</span>
+                <span>₹{totalAmount}</span>
+              </div>
+            </div>
+
+            {/* 1. SEAT CONFLICT / 409 ERROR ALERT (Distinct from Razorpay failure) */}
+            {paymentError.type === 'seat_conflict' && (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      Expiry Date
-                    </label>
-                    <input
-                      type="text"
-                      value={cardExpiry}
-                      onChange={(e) => setCardExpiry(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-hidden"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      CVV
-                    </label>
-                    <input
-                      type="password"
-                      value={cardCvv}
-                      onChange={(e) => setCardCvv(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-hidden"
-                    />
+                    <div className="font-bold text-amber-900 text-sm">These seats are no longer available</div>
+                    <div className="text-amber-800 mt-0.5">{paymentError.message}</div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('selection');
+                    setPaymentError({ type: 'none' });
+                  }}
+                  className="w-full py-2.5 px-4 bg-amber-900 hover:bg-amber-950 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Select another seat</span>
+                </button>
               </div>
             )}
 
-            {/* TAB CONTENT: NETBANKING */}
-            {paymentTab === 'netbanking' && (
-              <div className="space-y-3">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                  Select Popular Bank
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['HDFC Bank', 'ICICI Bank', 'State Bank of India', 'Axis Bank'].map((b) => (
-                    <button
-                      key={b}
-                      type="button"
-                      className="p-3 border border-slate-200 rounded-xl text-left text-xs font-bold text-slate-800 hover:bg-slate-50 cursor-pointer flex items-center gap-2"
-                    >
-                      <Building2 className="w-4 h-4 text-slate-600 shrink-0" />
-                      <span>{b}</span>
-                    </button>
-                  ))}
+            {/* 2. RAZORPAY PAYMENT DECLINED / FAILED ALERT */}
+            {paymentError.type === 'payment_failed' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-rose-900 text-sm">Payment failed or was declined</div>
+                    <div className="text-rose-800 mt-0.5">{paymentError.message}</div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Payment Failure Simulation Alert */}
-            {paymentFailed && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>Payment declined by bank simulator. Click "Pay" to retry.</span>
+            {/* 3. SIGNATURE VERIFICATION FAILED ALERT */}
+            {paymentError.type === 'verification_failed' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-rose-900 text-sm">Payment Verification Failed</div>
+                    <div className="text-rose-800 mt-0.5">{paymentError.message}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4. CHECKOUT CANCELLED ALERT */}
+            {paymentError.type === 'checkout_cancelled' && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                <RotateCcw className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold">Checkout Cancelled</div>
+                  <div className="text-amber-700 mt-0.5">{paymentError.message}</div>
+                </div>
+              </div>
+            )}
+
+            {/* 5. DRIVER SELF-BOOKING REJECTION */}
+            {paymentError.type === 'driver_self_booking' && (
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-rose-900 text-sm">Booking Not Allowed</div>
+                    <div className="text-rose-800 mt-0.5">Drivers cannot book their own trip.</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateScreen('trip-details')}
+                  className="w-full py-2.5 px-4 bg-rose-900 hover:bg-rose-950 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Return to Trip Details
+                </button>
+              </div>
+            )}
+
+            {/* 6. GENERIC SERVER / NETWORK ERROR */}
+            {paymentError.type === 'generic' && (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-rose-800">{paymentError.message}</div>
+                </div>
+              </div>
+            )}
+
+            {/* CHECKOUT DISMISSED / CANCELLED ALERT */}
+            {checkoutDismissed && paymentError.type === 'none' && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                <RotateCcw className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold">Checkout dismissed</div>
+                  <div className="text-amber-700 mt-0.5">The payment modal was closed before completing. Click below to retry when ready.</div>
+                </div>
               </div>
             )}
 
             {/* Action Buttons */}
-            <div className="pt-3 space-y-2">
+            <div className="pt-2 space-y-3">
               <button
-                disabled={isProcessing}
-                onClick={() => handleProcessPayment(false)}
-                className="w-full py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-base transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75"
+                disabled={isProcessing || paymentError.type === 'seat_conflict' || paymentError.type === 'driver_self_booking'}
+                onClick={handleLaunchRazorpayCheckout}
+                className="w-full py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-base transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isProcessing ? (
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    <span>Processing with Razorpay...</span>
+                    <span>Opening Razorpay Checkout...</span>
                   </span>
                 ) : (
-                  <span>Pay ₹{totalAmount}</span>
+                  <span>Pay ₹{totalAmount} via Razorpay (Test Mode)</span>
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={() => handleProcessPayment(true)}
-                className="w-full py-2 text-xs font-semibold text-slate-400 hover:text-slate-600 cursor-pointer text-center"
-              >
-                [Dev Test: Simulate Failed Payment]
-              </button>
+              <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Razorpay Test Sandbox • No real card charged</span>
+              </div>
             </div>
           </div>
 
@@ -500,13 +736,13 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
         <div>
           <span className="inline-block px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200 mb-2">
-            Payment Confirmed
+            Payment Confirmed (Razorpay Test Mode)
           </span>
           <h1 className="text-3xl font-black text-slate-950 tracking-tight">
             Your seat is reserved!
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            Reference code: <span className="font-mono font-bold text-slate-900">{bookingRef}</span>
+            Booking reference: <span className="font-mono font-bold text-slate-900">{bookingRef}</span>
           </p>
         </div>
 
@@ -541,6 +777,28 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               <span className="font-bold text-slate-900">{selectedSeatCount} {selectedSeatCount === 1 ? 'Seat' : 'Seats'}</span>
             </div>
           </div>
+
+          {/* Razorpay Test Order Details */}
+          {(lastOrderId || lastPaymentId) && (
+            <div className="pt-3 border-t border-slate-100 text-[11px] bg-slate-50 -mx-6 -mb-6 p-4 rounded-b-3xl space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                <Receipt className="w-3.5 h-3.5 text-blue-600" />
+                <span>Razorpay Test Transaction Details</span>
+              </div>
+              {lastOrderId && (
+                <div className="flex justify-between text-slate-500 font-mono">
+                  <span>Order ID:</span>
+                  <span className="text-slate-800">{lastOrderId}</span>
+                </div>
+              )}
+              {lastPaymentId && (
+                <div className="flex justify-between text-slate-500 font-mono">
+                  <span>Payment ID:</span>
+                  <span className="text-slate-800">{lastPaymentId}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}

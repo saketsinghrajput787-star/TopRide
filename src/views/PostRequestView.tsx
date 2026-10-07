@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PassengerRequest, ScreenId, User, LocationData } from '../types';
+import { api } from '../api';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -94,6 +95,47 @@ export const PostRequestView: React.FC<PostRequestViewProps> = ({
     setStep('success');
     showToast('Passenger ride request submitted!');
   };
+
+  const [isAutoMatching, setIsAutoMatching] = useState(false);
+
+  const handleAutoMatchAndBook = async () => {
+    if (isAutoMatching) return;
+    setIsAutoMatching(true);
+    showToast('Finding the best available trip...');
+    try {
+      const res = await api.autoAssignTrip({
+        origin: originLocation?.formattedAddress || originLocation?.name || origin,
+        destination: destLocation?.formattedAddress || destLocation?.name || destination,
+        date,
+        seats,
+        budget,
+        origin_latitude: originLocation?.latitude,
+        origin_longitude: originLocation?.longitude,
+        destination_latitude: destLocation?.latitude,
+        destination_longitude: destLocation?.longitude,
+        preferences: selectedPreferences,
+        notes,
+      });
+
+      if (res.status === 'assigned' || res.status === 'fallback_assigned') {
+        showToast(
+          res.status === 'fallback_assigned'
+            ? 'Matched with alternate trip!'
+            : 'Trip matched and confirmed!'
+        );
+        onNavigateScreen('trips');
+      } else {
+        showToast(res.message || 'No suitable trip available. Publishing request...');
+        handlePublish();
+      }
+    } catch {
+      showToast('No active match available right now. Request published for drivers!');
+      handlePublish();
+    } finally {
+      setIsAutoMatching(false);
+    }
+  };
+
 
   // ================= 1. FORM =================
   if (step === 'form') {
@@ -345,19 +387,43 @@ export const PostRequestView: React.FC<PostRequestViewProps> = ({
             </div>
           </div>
 
-          <div className="pt-3 flex gap-3">
+          <div className="pt-3 space-y-2.5">
             <button
-              onClick={() => setStep('form')}
-              className="flex-1 py-4 px-6 rounded-2xl bg-slate-100 text-slate-800 font-bold text-sm cursor-pointer"
+              onClick={handleAutoMatchAndBook}
+              disabled={isAutoMatching}
+              className={`w-full py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer ${
+                isAutoMatching
+                  ? 'bg-slate-700 text-slate-300 cursor-not-allowed'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 active:scale-95'
+              }`}
             >
-              Edit
+              {isAutoMatching ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Matching Best Trip...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Auto-Match & Book Best Ride Now</span>
+                </>
+              )}
             </button>
-            <button
-              onClick={handlePublish}
-              className="flex-1 py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm cursor-pointer"
-            >
-              Publish request
-            </button>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep('form')}
+                className="flex-1 py-3.5 px-6 rounded-2xl bg-slate-100 text-slate-800 font-bold text-sm cursor-pointer"
+              >
+                Edit
+              </button>
+              <button
+                onClick={handlePublish}
+                className="flex-1 py-3.5 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm cursor-pointer"
+              >
+                Publish Request Only
+              </button>
+            </div>
           </div>
         </div>
       </div>

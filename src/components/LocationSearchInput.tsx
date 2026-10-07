@@ -30,11 +30,20 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<any>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Synchronize internal query state with prop value
   useEffect(() => {
     setQuery(value);
   }, [value]);
+
+  // Clean up timers and in-flight controllers on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+    };
+  }, []);
 
   // Handle outside click to close dropdown
   useEffect(() => {
@@ -52,6 +61,10 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
     onChange(text);
 
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
 
     if (!isMapboxAvailable() || text.trim().length < 2) {
       setResults([]);
@@ -64,15 +77,30 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
     setIsOpen(true);
 
     debounceTimerRef.current = setTimeout(async () => {
-      const places = await searchMapboxLocations(text);
-      setResults(places);
-      setIsLoading(false);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      try {
+        const places = await searchMapboxLocations(text, controller.signal);
+        if (!controller.signal.aborted) {
+          setResults(Array.isArray(places) ? places : []);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          setResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
     }, 280);
   };
 
   const handleSelect = (loc: LocationData) => {
-    setQuery(loc.name);
-    onChange(loc.name);
+    if (!loc) return;
+    const selectedName = loc.name || '';
+    setQuery(selectedName);
+    onChange(selectedName);
     setIsOpen(false);
     setResults([]);
     if (onSelectLocation) {
@@ -156,9 +184,9 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
               <MapPin className="w-4 h-4 text-slate-400 group-hover:text-slate-900 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                  {loc.name}
+                  {loc?.name || 'Location'}
                 </div>
-                {loc.formattedAddress && (
+                {loc?.formattedAddress && (
                   <div className="text-[11px] text-slate-500 truncate mt-0.5">
                     {loc.formattedAddress}
                   </div>
