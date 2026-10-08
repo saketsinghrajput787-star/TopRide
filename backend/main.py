@@ -1,6 +1,20 @@
+import os
+import sys
+from pathlib import Path
 import uuid
 import datetime
 from typing import List, Optional
+
+# Ensure both repository root and backend directory are in sys.path
+# so that imports like `from backend.config import ...` and `from config import ...`
+# resolve cleanly whether running from repository root or backend/ directory (Render root directory)
+_current_dir = Path(__file__).resolve().parent
+_repo_root = _current_dir.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
+
 from fastapi import FastAPI, HTTPException, status, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -46,10 +60,26 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Enable CORS for frontend Vite dev server and production
+# CORS Configuration
+# Supports local dev (localhost:5173), custom origins via ALLOWED_ORIGINS env var,
+# and all Vercel deployments via ALLOWED_ORIGIN_REGEX.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+if _raw_origins:
+    _allowed_origins = [orig.strip() for orig in _raw_origins.split(",") if orig.strip()]
+else:
+    _allowed_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ]
+
+_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", r"^https:\/\/.*\.vercel\.app$")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,6 +152,8 @@ def resolve_or_create_profile(user_id: str, client=None, email: str = "", name: 
     return upsert_profile_in_db(new_profile, client=client)
 
 # ================= 1. HEALTH & ROOT =================
+@app.get("/")
+@app.get("/health")
 @app.get("/api/health")
 def health_check():
     return {
