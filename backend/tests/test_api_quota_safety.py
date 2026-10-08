@@ -136,17 +136,20 @@ def test_safety_11_retry_logic_is_bounded():
 
 def test_safety_12_no_polling_exists_in_codebase():
     """Verify no setInterval polling loops exist in frontend or backend matching."""
-    root_dir = Path(__file__).resolve().parent.parent
-    src_dir = root_dir / "src"
+    # Find repo root regardless of nesting
+    current = Path(__file__).resolve()
+    root_dir = current.parents[2] if "tests" in current.parts else current.parents[1]
+    src_dir = root_dir / "frontend" / "src" if (root_dir / "frontend" / "src").exists() else root_dir / "src"
     backend_dir = root_dir / "backend"
 
     # Search for setInterval in frontend
     interval_patterns = []
-    for f in src_dir.glob("**/*.ts*"):
-        text = f.read_text(encoding="utf-8", errors="ignore")
-        matches = re.findall(r"setInterval\s*\(", text)
-        if matches:
-            interval_patterns.append((f.name, len(matches)))
+    if src_dir.exists():
+        for f in src_dir.glob("**/*.ts*"):
+            text = f.read_text(encoding="utf-8", errors="ignore")
+            matches = re.findall(r"setInterval\s*\(", text)
+            if matches:
+                interval_patterns.append((f.name, len(matches)))
 
     # No polling interval for API matching or payments
     assert len(interval_patterns) == 0, f"Found forbidden setInterval polling: {interval_patterns}"
@@ -184,7 +187,12 @@ def test_safety_14_scoring_loop_zero_external_http_requests():
 
 def test_safety_15_no_duplicate_api_calls_from_concurrent_requests():
     """Verify in-flight deduplication map pattern in frontend Mapbox service."""
-    mapbox_ts = (Path(__file__).resolve().parent.parent / "src" / "services" / "mapbox.ts").read_text(encoding="utf-8")
+    current = Path(__file__).resolve()
+    root_dir = current.parents[2] if "tests" in current.parts else current.parents[1]
+    mapbox_path = root_dir / "frontend" / "src" / "services" / "mapbox.ts"
+    if not mapbox_path.exists():
+        mapbox_path = root_dir / "src" / "services" / "mapbox.ts"
+    mapbox_ts = mapbox_path.read_text(encoding="utf-8")
     assert "inFlightPlaces" in mapbox_ts, "Frontend must maintain inFlightPlaces Promise map"
     assert "inFlightRoutes" in mapbox_ts, "Frontend must maintain inFlightRoutes Promise map"
     assert "placesCache" in mapbox_ts, "Frontend must maintain placesCache Map"

@@ -29,6 +29,43 @@ supabase_client: Client = create_client(SUPABASE_URL, key_to_use)
 # Concurrency lock for seat booking operations
 booking_lock = asyncio.Lock()
 
+def to_canonical_iso_date(date_val: Optional[str], default_year: int = 2026) -> Optional[str]:
+    """
+    Normalizes any date string (ISO 'YYYY-MM-DD' or legacy 'Sat, 10 Oct')
+    into a canonical ISO date 'YYYY-MM-DD' without discarding the year.
+    """
+    if not date_val:
+        return None
+    val = date_val.strip()
+    try:
+        parts = val.split("-")
+        if len(parts) == 3 and len(parts[0]) == 4:
+            return datetime.date.fromisoformat(val).isoformat()
+    except Exception:
+        pass
+    try:
+        clean_words = [w for w in val.replace(",", " ").split() if len(w) > 0]
+        months = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+        }
+        day, month, year = None, None, default_year
+        for w in clean_words:
+            low = w.lower()[:3]
+            if low in months:
+                month = months[low]
+            elif w.isdigit():
+                num = int(w)
+                if num > 1900:
+                    year = num
+                elif 1 <= num <= 31 and day is None:
+                    day = num
+        if day is not None and month is not None:
+            return datetime.date(year, month, day).isoformat()
+    except Exception:
+        pass
+    return None
+
 # Cache for active Razorpay test orders (deduplication / fallback before migration)
 _recent_razorpay_orders: Dict[str, Any] = {}
 
@@ -1426,6 +1463,17 @@ def fetch_trips_from_db(
                 continue
             if destination and not location_matches(destination, t.destination, t.destinationDetail or "", t.destinationAddress):
                 continue
+            if date and date.strip():
+                req_iso = to_canonical_iso_date(date)
+                trip_iso = to_canonical_iso_date(t.date)
+                if req_iso and trip_iso:
+                    if req_iso != trip_iso:
+                        continue
+                else:
+                    clean_req = date.strip().lower().replace(" ", "").replace(",", "")
+                    clean_trip = (t.date or "").strip().lower().replace(" ", "").replace(",", "")
+                    if clean_req and clean_trip and clean_req != clean_trip and clean_req not in clean_trip and clean_trip not in clean_req:
+                        continue
             if only_verified and not t.driverIsVerified:
                 continue
             if time_filter and time_filter != "all":

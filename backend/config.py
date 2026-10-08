@@ -2,10 +2,16 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Locate .env file in root directory
-root_dir = Path(__file__).resolve().parent.parent
-env_path = root_dir / ".env"
-load_dotenv(dotenv_path=env_path)
+# Locate .env file in backend directory or root repository directory
+backend_dir = Path(__file__).resolve().parent
+backend_env_path = backend_dir / ".env"
+root_env_path = backend_dir.parent / ".env"
+if backend_env_path.exists():
+    load_dotenv(dotenv_path=backend_env_path)
+elif root_env_path.exists():
+    load_dotenv(dotenv_path=root_env_path)
+else:
+    load_dotenv()
 
 SUPABASE_URL: str = os.getenv("SUPABASE_URL", "https://jocpolzoovgpnbnhluoq.supabase.co")
 SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "sb_publishable__zePG8Nbo4XvSq-0QHmzwQ_HKhIOoRA")

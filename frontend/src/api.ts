@@ -379,10 +379,11 @@ export const api = {
     destination_latitude?: number;
     destination_longitude?: number;
     preferences?: string[];
-  }): Promise<MatchingResponse> {
+  }, signal?: AbortSignal): Promise<MatchingResponse> {
     return request<MatchingResponse>('/api/matching/find', {
       method: 'POST',
       body: JSON.stringify(params),
+      signal,
     });
   },
 

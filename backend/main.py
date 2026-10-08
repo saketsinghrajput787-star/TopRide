@@ -755,27 +755,6 @@ def estimate_trip_market_price(
     scoped_client = get_user_supabase_client(token)
     return DynamicPricingEngine.calculate_price(req, client=scoped_client)
 
-# ================= 16. AUTOMATIC MATCHING =================
-@app.post("/api/matching/find", response_model=MatchingResponse)
-def find_matching_trips(
-    req: MatchingRequest,
-    user_id: str = Depends(get_authenticated_user_id),
-    authorization: Optional[str] = Header(None)
-):
-    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
-    scoped_client = get_user_supabase_client(token)
-    return MatchingEngine.find_matches(req, user_id=user_id, client=scoped_client)
-
-@app.post("/api/matching/assign", response_model=AssignmentResponse)
-def assign_matched_trip(
-    req: AssignmentRequest,
-    user_id: str = Depends(get_authenticated_user_id),
-    authorization: Optional[str] = Header(None)
-):
-    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
-    scoped_client = get_user_supabase_client(token)
-    return MatchingEngine.auto_assign(req, user_id=user_id, client=scoped_client)
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="0.0.0.0", port=PORT, reload=True)

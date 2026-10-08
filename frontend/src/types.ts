@@ -298,6 +298,8 @@ export interface MatchingResponse {
   candidates: CandidateMatch[];
   total_candidates: number;
   best_match?: CandidateMatch | null;
+  other_options?: CandidateMatch[];
+  total_matches?: number;
   status: 'matched' | 'no_matches';
   message: string;
 }

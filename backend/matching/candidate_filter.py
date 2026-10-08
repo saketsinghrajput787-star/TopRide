@@ -4,7 +4,45 @@ from backend.config import MAX_DEPARTURE_DELTA_MINUTES
 from backend.schemas import TripSchema
 from backend.matching.models import MatchingRequest
 from backend.matching.feature_calculator import extract_location_info, parse_time_to_minutes, haversine_distance_km
+import datetime
 from backend.database import supabase_client, fetch_trips_from_db
+
+def to_canonical_iso_date(date_val: Optional[str], default_year: int = 2026) -> Optional[str]:
+    """
+    Normalizes any date string (ISO 'YYYY-MM-DD' or legacy 'Sat, 10 Oct')
+    into a canonical ISO date 'YYYY-MM-DD' without discarding the year.
+    """
+    if not date_val:
+        return None
+    val = date_val.strip()
+    try:
+        parts = val.split("-")
+        if len(parts) == 3 and len(parts[0]) == 4:
+            return datetime.date.fromisoformat(val).isoformat()
+    except Exception:
+        pass
+    try:
+        clean_words = [w for w in val.replace(",", " ").split() if len(w) > 0]
+        months = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+        }
+        day, month, year = None, None, default_year
+        for w in clean_words:
+            low = w.lower()[:3]
+            if low in months:
+                month = months[low]
+            elif w.isdigit():
+                num = int(w)
+                if num > 1900:
+                    year = num
+                elif 1 <= num <= 31 and day is None:
+                    day = num
+        if day is not None and month is not None:
+            return datetime.date(year, month, day).isoformat()
+    except Exception:
+        pass
+    return None
 
 class CandidateFilter:
     """Filters eligible trips using database queries and strict hard constraints."""
@@ -167,13 +205,17 @@ class CandidateFilter:
         if trip.status != "upcoming":
             return False, f"Trip status is '{trip.status}', not upcoming"
 
-        # Constraint 3: Date match
+        # Constraint 3: Canonical ISO Date match (YYYY-MM-DD)
         if request.date and trip.date:
-            clean_req_date = request.date.lower().replace(" ", "").replace(",", "")
-            clean_trip_date = trip.date.lower().replace(" ", "").replace(",", "")
-            if clean_req_date != clean_trip_date:
-                # If neither contains the other
-                if clean_req_date not in clean_trip_date and clean_trip_date not in clean_req_date:
+            req_iso = to_canonical_iso_date(request.date)
+            trip_iso = to_canonical_iso_date(trip.date)
+            if req_iso and trip_iso:
+                if req_iso != trip_iso:
+                    return False, f"Date mismatch: requested {req_iso}, trip is {trip_iso}"
+            else:
+                clean_req_date = request.date.lower().replace(" ", "").replace(",", "")
+                clean_trip_date = trip.date.lower().replace(" ", "").replace(",", "")
+                if clean_req_date != clean_trip_date and clean_req_date not in clean_trip_date and clean_trip_date not in clean_req_date:
                     return False, f"Date mismatch: requested {request.date}, trip is {trip.date}"
 
         # Constraint 4: Available seats

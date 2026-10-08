@@ -79,6 +79,8 @@ class MatchingResponse(BaseModel):
     candidates: List[CandidateMatch]
     total_candidates: int
     best_match: Optional[CandidateMatch] = None
+    other_options: Optional[List[CandidateMatch]] = Field(default_factory=list)
+    total_matches: Optional[int] = 0
     status: Literal["matched", "no_matches"]
     message: str
 

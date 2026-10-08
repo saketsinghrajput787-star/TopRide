@@ -95,6 +95,8 @@ class MatchingEngine:
                 candidates=[],
                 total_candidates=0,
                 best_match=None,
+                other_options=[],
+                total_matches=0,
                 status="no_matches",
                 message="No suitable trip is currently available that satisfies your route, schedule, and seating requirements."
             )
@@ -102,12 +104,15 @@ class MatchingEngine:
         # 7. Deterministic candidate ranking
         ranked = Ranker.rank_candidates(candidates)
         best = ranked[0]
+        other_opts = ranked[1:] if len(ranked) > 1 else []
 
         return MatchingResponse(
             request_id=request_id,
             candidates=ranked,
             total_candidates=len(ranked),
             best_match=best,
+            other_options=other_opts,
+            total_matches=len(ranked),
             status="matched",
             message=f"Found {len(ranked)} matching trip(s). Best match: {best.trip.driverName} ({best.match_score:.1f}% match)."
         )
