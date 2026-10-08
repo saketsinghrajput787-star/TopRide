@@ -763,3 +763,74 @@ def test_37_find_does_not_reserve_seats_assign_performs_atomic_booking():
         assert mock_atomic.call_count == 1
         call_args = mock_atomic.call_args[1]
         assert call_args["seats_count"] == 2
+
+def test_38_regression_production_find_matching_flow():
+    """
+    REGRESSION AUDIT: Production Find matching flow
+    - Valid trip is returned for exact requested canonical date (YYYY-MM-DD)
+    - Valid geographic route is matched
+    - Invalid date is excluded
+    - Invalid route is excluded
+    - Unavailable seats are excluded
+    - Best match is selected correctly (dominant best_match)
+    - Other options are returned correctly
+    - Response contract structure matches frontend expectations
+    - Driver cannot book own trip (passenger_id != driver_id)
+    """
+    trip_pune_1 = make_trip("trip_mp_1", origin="Mumbai", destination="Pune", date="2026-10-12", departure_time="07:00", available_seats=3, price_per_seat=450.0, driver_id="driver_arjun")
+    trip_pune_2 = make_trip("trip_mp_2", origin="Mumbai", destination="Pune", date="2026-10-12", departure_time="08:30", available_seats=2, price_per_seat=480.0, driver_id="driver_saket")
+    trip_other_date = make_trip("trip_mp_wrong_date", origin="Mumbai", destination="Pune", date="2026-10-15", departure_time="07:00", available_seats=3, driver_id="driver_priya")
+    trip_other_route = make_trip("trip_wrong_route", origin="Delhi", destination="Jaipur", date="2026-10-12", departure_time="07:00", available_seats=3, driver_id="driver_rahul")
+
+    all_candidates = [trip_pune_1, trip_pune_2, trip_other_date, trip_other_route]
+
+    # 1. Exact valid route and date search
+    req = MatchingRequest(origin="Mumbai", destination="Pune", date="2026-10-12", seats=1, passenger_id="passenger_vikram")
+    with patch.object(CandidateFilter, "get_candidate_trips", return_value=all_candidates), \
+         patch.object(CandidateFilter, "get_driver_rating_counts", return_value={}):
+        res = MatchingEngine.match(req)
+        assert res.status == "matched"
+        assert res.best_match is not None
+        assert res.best_match.trip.id in ["trip_mp_1", "trip_mp_2"]
+        assert len(res.other_options) == 1
+        assert res.total_matches == 2
+        # Verify contract properties
+        assert hasattr(res, "best_match")
+        assert hasattr(res, "other_options")
+        assert hasattr(res, "total_matches")
+
+    # 2. Invalid date search excludes candidate trips
+    req_bad_date = MatchingRequest(origin="Mumbai", destination="Pune", date="2026-10-20", seats=1, passenger_id="passenger_vikram")
+    with patch.object(CandidateFilter, "get_candidate_trips", return_value=all_candidates), \
+         patch.object(CandidateFilter, "get_driver_rating_counts", return_value={}):
+        res_bad_date = MatchingEngine.match(req_bad_date)
+        assert res_bad_date.status == "no_matches"
+        assert res_bad_date.total_matches == 0
+        assert res_bad_date.best_match is None
+
+    # 3. Invalid route search excludes candidate trips
+    req_bad_route = MatchingRequest(origin="Chennai", destination="Kochi", date="2026-10-12", seats=1, passenger_id="passenger_vikram")
+    with patch.object(CandidateFilter, "get_candidate_trips", return_value=all_candidates), \
+         patch.object(CandidateFilter, "get_driver_rating_counts", return_value={}):
+        res_bad_route = MatchingEngine.match(req_bad_route)
+        assert res_bad_route.status == "no_matches"
+        assert res_bad_route.total_matches == 0
+
+    # 4. Unavailable seats (requesting 4 seats when max is 3)
+    req_excess_seats = MatchingRequest(origin="Mumbai", destination="Pune", date="2026-10-12", seats=4, passenger_id="passenger_vikram")
+    with patch.object(CandidateFilter, "get_candidate_trips", return_value=all_candidates), \
+         patch.object(CandidateFilter, "get_driver_rating_counts", return_value={}):
+        res_excess = MatchingEngine.match(req_excess_seats)
+        assert res_excess.status == "no_matches"
+        assert res_excess.total_matches == 0
+
+    # 5. Driver cannot book own trip (Constraint 8)
+    req_as_driver = MatchingRequest(origin="Mumbai", destination="Pune", date="2026-10-12", seats=1, passenger_id="driver_arjun")
+    with patch.object(CandidateFilter, "get_candidate_trips", return_value=all_candidates), \
+         patch.object(CandidateFilter, "get_driver_rating_counts", return_value={}):
+        res_as_driver = MatchingEngine.match(req_as_driver)
+        assert res_as_driver.status == "matched"
+        # driver_arjun's own trip must be excluded; only driver_saket's trip remains
+        assert res_as_driver.total_matches == 1
+        assert res_as_driver.best_match.trip.driverId == "driver_saket"
+

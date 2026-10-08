@@ -686,11 +686,17 @@ def schema_to_profile_row(user: UserProfile) -> Dict[str, Any]:
 
 def fetch_profile_from_db(user_id: str, client: Optional[Client] = None) -> Optional[UserProfile]:
     """Fetch user profile from public.profiles table in Supabase."""
+    if not user_id:
+        return None
+    if user_id in db.users:
+        return db.users[user_id]
     c = client or supabase_client
     try:
         res = c.table("profiles").select("*").eq("id", user_id).execute()
         if res.data and len(res.data) > 0:
-            return profile_row_to_schema(res.data[0])
+            prof = profile_row_to_schema(res.data[0])
+            db.users[user_id] = prof
+            return prof
     except Exception as e:
         print(f"[Supabase] fetch_profile_from_db error for {user_id}: {e}")
     # Check cache / in-memory store
@@ -982,6 +988,8 @@ def mark_conversation_read_in_db(
         print(f"[Supabase] mark_conversation_read error: {e}")
         return False
 
+_VEHICLE_CACHE: Dict[str, VehicleSchema] = {}
+
 # ================= 6. TRIPS & TRIP SEATS (DATABASE-BACKED) =================
 def trip_row_to_schema(
     row: Dict[str, Any],
@@ -997,7 +1005,7 @@ def trip_row_to_schema(
     driver_trips_count = driver_profile.tripsCount if driver_profile else 0
     driver_is_verified = driver_profile.isVerified if driver_profile else False
 
-    # Vehicle enrichment
+    # Vehicle enrichment (with in-memory cache)
     veh_id = row.get("vehicle_id")
     veh_schema = VehicleSchema(
         id=str(veh_id) if veh_id else "",
@@ -1008,21 +1016,26 @@ def trip_row_to_schema(
         plateNumber="Verified Vehicle"
     )
     if veh_id:
-        try:
-            v_res = c.table("vehicles").select("*").eq("id", veh_id).execute()
-            if v_res.data and len(v_res.data) > 0:
-                v_data = v_res.data[0]
-                veh_schema = VehicleSchema(
-                    id=str(v_data["id"]),
-                    make=v_data.get("make") or "Vehicle",
-                    model=v_data.get("model") or "",
-                    year=int(v_data.get("year") or 2023),
-                    color=v_data.get("color") or "White",
-                    plateNumber=v_data.get("plate_number") or "",
-                    isDefault=bool(v_data.get("is_default", False))
-                )
-        except Exception:
-            pass
+        v_key = str(veh_id)
+        if v_key in _VEHICLE_CACHE:
+            veh_schema = _VEHICLE_CACHE[v_key]
+        else:
+            try:
+                v_res = c.table("vehicles").select("*").eq("id", veh_id).execute()
+                if v_res.data and len(v_res.data) > 0:
+                    v_data = v_res.data[0]
+                    veh_schema = VehicleSchema(
+                        id=str(v_data["id"]),
+                        make=v_data.get("make") or "Vehicle",
+                        model=v_data.get("model") or "",
+                        year=int(v_data.get("year") or 2023),
+                        color=v_data.get("color") or "White",
+                        plateNumber=v_data.get("plate_number") or "",
+                        isDefault=bool(v_data.get("is_default", False))
+                    )
+                    _VEHICLE_CACHE[v_key] = veh_schema
+            except Exception:
+                pass
 
     # Dynamic roles
     is_driver = bool(user_id and driver_id == user_id)
@@ -1046,13 +1059,14 @@ def trip_row_to_schema(
     total_seats = int(row.get("total_seats") or 3)
     available_seats = int(row.get("available_seats") if row.get("available_seats") is not None else total_seats)
     
-    # Query real seat ledger from trip_seats if available
-    try:
-        s_res = c.table("trip_seats").select("id, status").eq("trip_id", row["id"]).execute()
-        if s_res.data and len(s_res.data) > 0:
-            available_seats = sum(1 for s in s_res.data if s.get("status") == "available")
-    except Exception:
-        pass
+    # Query real seat ledger from trip_seats only if available_seats not explicitly tracked
+    if row.get("available_seats") is None:
+        try:
+            s_res = c.table("trip_seats").select("id, status").eq("trip_id", row["id"]).execute()
+            if s_res.data and len(s_res.data) > 0:
+                available_seats = sum(1 for s in s_res.data if s.get("status") == "available")
+        except Exception:
+            pass
 
     return TripSchema(
         id=str(row["id"]),
@@ -1454,31 +1468,28 @@ def fetch_trips_from_db(
         res = query.execute()
         rows = res.data or []
 
-        trips = [trip_row_to_schema(r, user_id=user_id, client=c) for r in rows]
-
-        # In-memory filtering: location matches, verified driver, time window, sorting
-        filtered = []
-        for t in trips:
-            if origin and not location_matches(origin, t.origin, t.originDetail or "", t.originAddress):
+        # Pre-filter raw DB rows BEFORE calling expensive trip_row_to_schema to eliminate N+1 queries
+        candidate_rows = []
+        for r in rows:
+            if origin and not location_matches(origin, r.get("origin") or "", r.get("origin_detail") or "", r.get("origin_address")):
                 continue
-            if destination and not location_matches(destination, t.destination, t.destinationDetail or "", t.destinationAddress):
+            if destination and not location_matches(destination, r.get("destination") or "", r.get("destination_detail") or "", r.get("destination_address")):
                 continue
             if date and date.strip():
                 req_iso = to_canonical_iso_date(date)
-                trip_iso = to_canonical_iso_date(t.date)
+                trip_iso = to_canonical_iso_date(r.get("date") or "")
                 if req_iso and trip_iso:
                     if req_iso != trip_iso:
                         continue
                 else:
                     clean_req = date.strip().lower().replace(" ", "").replace(",", "")
-                    clean_trip = (t.date or "").strip().lower().replace(" ", "").replace(",", "")
+                    clean_trip = (r.get("date") or "").strip().lower().replace(" ", "").replace(",", "")
                     if clean_req and clean_trip and clean_req != clean_trip and clean_req not in clean_trip and clean_trip not in clean_req:
                         continue
-            if only_verified and not t.driverIsVerified:
-                continue
             if time_filter and time_filter != "all":
                 try:
-                    hour = int(t.departureTime.split(":")[0])
+                    dep_time = r.get("departure_time") or ""
+                    hour = int(dep_time.split(":")[0])
                     if time_filter == "morning" and (hour < 6 or hour >= 12):
                         continue
                     if time_filter == "afternoon" and (hour < 12 or hour >= 17):
@@ -1487,6 +1498,15 @@ def fetch_trips_from_db(
                         continue
                 except Exception:
                     pass
+            candidate_rows.append(r)
+
+        trips = [trip_row_to_schema(r, user_id=user_id, client=c) for r in candidate_rows]
+
+        # In-memory filtering: verified driver check and sorting
+        filtered = []
+        for t in trips:
+            if only_verified and not t.driverIsVerified:
+                continue
             filtered.append(t)
 
         if sort_by == "cheapest":
