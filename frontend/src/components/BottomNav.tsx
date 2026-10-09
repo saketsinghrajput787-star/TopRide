@@ -38,8 +38,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onNavigateTab('home')}
           className={`flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-colors cursor-pointer ${
             currentTab === 'home'
-              ? 'text-slate-950 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
+              ? 'text-[#F05A28] font-bold'
+              : 'text-slate-400 hover:text-slate-700 font-medium'
           }`}
         >
           <Home className={`w-5 h-5 mb-0.5 ${currentTab === 'home' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
@@ -51,8 +51,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onNavigateTab('find')}
           className={`flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-colors cursor-pointer ${
             currentTab === 'find'
-              ? 'text-slate-950 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
+              ? 'text-[#F05A28] font-bold'
+              : 'text-slate-400 hover:text-slate-700 font-medium'
           }`}
         >
           <Search className={`w-5 h-5 mb-0.5 ${currentTab === 'find' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
@@ -64,8 +64,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onNavigateTab('trips')}
           className={`flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-colors cursor-pointer ${
             currentTab === 'trips'
-              ? 'text-slate-950 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
+              ? 'text-[#F05A28] font-bold'
+              : 'text-slate-400 hover:text-slate-700 font-medium'
           }`}
         >
           <Calendar className={`w-5 h-5 mb-0.5 ${currentTab === 'trips' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
@@ -77,14 +77,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onNavigateTab('inbox')}
           className={`relative flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-colors cursor-pointer ${
             currentTab === 'inbox'
-              ? 'text-slate-950 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
+              ? 'text-[#F05A28] font-bold'
+              : 'text-slate-400 hover:text-slate-700 font-medium'
           }`}
         >
           <div className="relative">
             <MessageSquare className={`w-5 h-5 mb-0.5 ${currentTab === 'inbox' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
             {unreadMessagesCount > 0 && (
-              <span className="absolute -top-1 -right-2 px-1 py-0.2 bg-slate-900 text-white font-bold text-[9px] rounded-full">
+              <span className="absolute -top-1 -right-2 px-1 py-0.2 bg-[#F05A28] text-white font-bold text-[9px] rounded-full">
                 {unreadMessagesCount}
               </span>
             )}
@@ -97,8 +97,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           onClick={() => onNavigateTab('account')}
           className={`flex flex-col items-center justify-center flex-1 py-1 rounded-xl transition-colors cursor-pointer ${
             currentTab === 'account'
-              ? 'text-slate-950 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
+              ? 'text-[#F05A28] font-bold'
+              : 'text-slate-400 hover:text-slate-700 font-medium'
           }`}
         >
           <UserIcon className={`w-5 h-5 mb-0.5 ${currentTab === 'account' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />

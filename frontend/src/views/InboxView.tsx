@@ -190,7 +190,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                         <div
                           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed ${
                             m.isMe
-                              ? 'bg-slate-950 text-white rounded-tr-xs shadow-xs'
+                              ? 'bg-[#F05A28] text-white rounded-tr-xs shadow-xs'
                               : 'bg-white text-slate-900 border border-slate-200 rounded-tl-xs shadow-xs'
                           }`}
                         >
@@ -200,7 +200,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                         {/* Timestamp & Status */}
                         <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-1 px-1">
                           <span>{m.timestamp}</span>
-                          {m.isMe && <CheckCheck className="w-3 h-3 text-emerald-600" />}
+                          {m.isMe && <CheckCheck className="w-3 h-3 text-white/80" />}
                         </div>
                       </div>
 
@@ -252,13 +252,13 @@ export const InboxView: React.FC<InboxViewProps> = ({
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="Type a message..."
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-hidden focus:border-slate-950"
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-hidden focus:border-[#F05A28]"
                 />
 
                 <button
                   type="submit"
                   disabled={!inputText.trim()}
-                  className="w-10 h-10 rounded-xl bg-slate-950 hover:bg-slate-800 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer"
+                  className="w-10 h-10 rounded-xl bg-[#F05A28] hover:bg-[#d84a1b] disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95"
                 >
                   <Send className="w-4 h-4" />
                 </button>

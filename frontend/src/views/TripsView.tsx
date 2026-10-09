@@ -77,7 +77,7 @@ export const TripsView: React.FC<TripsViewProps> = ({
         {/* Post trip CTA */}
         <button
           onClick={() => onNavigateScreen('post-trip')}
-          className="self-start sm:self-auto px-4 py-2 rounded-xl bg-slate-950 text-white font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+          className="self-start sm:self-auto px-4 py-2 rounded-xl bg-[#F05A28] text-white font-bold text-xs hover:bg-[#d84a1b] transition-colors cursor-pointer shadow-xs active:scale-98"
         >
           + Post a new drive
         </button>

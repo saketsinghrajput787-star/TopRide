@@ -306,7 +306,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                     type="button"
                     onClick={() => setSeats(s)}
                     className={`flex-1 py-2.5 rounded-xl font-black text-sm transition-all cursor-pointer ${
-                      seats === s ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      seats === s ? 'bg-[#F05A28] text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
                     {s}
@@ -422,7 +422,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
 
           <button
             type="submit"
-            className="w-full mt-4 py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-base transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full mt-4 py-4 px-6 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-base transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
             <span>Review trip details</span>
             <ArrowRight className="w-4 h-4" />
@@ -523,7 +523,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
             <button
               type="button"
               onClick={handlePublish}
-              className="w-2/3 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+              className="w-2/3 py-4 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
             >
               <span>Publish Ride Now</span>
               <Sparkles className="w-4 h-4" />

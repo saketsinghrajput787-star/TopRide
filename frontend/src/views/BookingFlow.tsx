@@ -258,7 +258,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
           contact: currentUser.phone || '+919876543210',
         },
         theme: {
-          color: '#020617', // Slate 950
+          color: '#F05A28', // TopRide brand orange
         },
         modal: {
           ondismiss: () => {
@@ -762,7 +762,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               <button
                 disabled={isProcessing || paymentError.type === 'seat_conflict' || paymentError.type === 'driver_self_booking'}
                 onClick={handleLaunchRazorpayCheckout}
-                className="w-full py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-base transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-4 px-6 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-base transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isProcessing ? (
                   <span className="flex items-center gap-2">

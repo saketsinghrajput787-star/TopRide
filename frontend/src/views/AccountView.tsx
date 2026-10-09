@@ -106,7 +106,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
       {/* ================= ACCOUNT HERO CARD ================= */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-slate-950 text-white font-black text-xl flex items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-[#F05A28] text-white font-black text-xl flex items-center justify-center shadow-sm">
             {user.initials}
           </div>
           <div>
@@ -135,7 +135,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
           <button
             onClick={() => setActiveSection('payments')}
-            className="px-4 py-2.5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer"
+            className="px-4 py-2.5 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-xs transition-colors cursor-pointer shadow-xs active:scale-98"
           >
             Withdraw
           </button>

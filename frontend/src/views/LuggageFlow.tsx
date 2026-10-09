@@ -195,20 +195,32 @@ export const LuggageFlow: React.FC<LuggageFlowProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
                 Package Size Category
               </label>
-              <select
-                value={size}
-                onChange={(e) => setSize(e.target.value as any)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold text-slate-900 text-sm focus:outline-hidden bg-white"
-              >
-                <option value="Document">Envelope / Document</option>
-                <option value="Small (< 5kg)">Small (&lt; 5kg)</option>
-                <option value="Medium (< 15kg)">Medium (&lt; 15kg)</option>
-                <option value="Large (< 25kg)">Large (&lt; 25kg)</option>
-              </select>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'Document', label: 'Document / Envelope', desc: '< 0.5kg' },
+                  { id: 'Small (< 5kg)', label: 'Small Package', desc: '< 5kg' },
+                  { id: 'Medium (< 15kg)', label: 'Medium Box', desc: '< 15kg' },
+                  { id: 'Large (< 25kg)', label: 'Large Luggage', desc: '< 25kg' },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSize(cat.id as any)}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                      size === cat.id
+                        ? 'border-[#F05A28] bg-[#F05A28]/5 ring-1 ring-[#F05A28]'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="font-bold text-xs text-slate-900">{cat.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{cat.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -274,7 +286,7 @@ export const LuggageFlow: React.FC<LuggageFlowProps> = ({
 
           <button
             type="submit"
-            className="w-full py-4 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-base transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-4 px-6 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-base transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
             <span>Search travelers on route</span>
             <Search className="w-4 h-4" />

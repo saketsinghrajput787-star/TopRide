@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavigationTab, ScreenId, User } from '../types';
 import { Bell, Plus, ArrowLeft, ShieldCheck } from 'lucide-react';
+import { TopRideLogo } from './TopRideLogo';
 
 interface NavbarProps {
   currentTab: NavigationTab;
@@ -70,23 +71,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* ================= DESKTOP HEADER (md and up) ================= */}
       <header className="hidden md:block sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
-          {/* Logo & Brand */}
+          {/* Exact Figma Logo & Brand */}
           <div className="flex items-center gap-8">
             <button
               onClick={() => onNavigateTab('home')}
-              className="flex items-center gap-2.5 group cursor-pointer focus:outline-hidden"
+              className="flex items-center group cursor-pointer focus:outline-hidden"
+              aria-label="TopRide Home"
             >
-              <div className="w-10 h-10 rounded-xl bg-slate-950 flex items-center justify-center text-white font-black text-sm tracking-tight shadow-sm group-hover:scale-105 transition-transform">
-                TOP
-              </div>
-              <div className="text-left">
-                <span className="font-black text-xl tracking-tight text-slate-900 group-hover:text-slate-700 transition-colors">
-                  TopRide
-                </span>
-                <span className="hidden lg:inline-block text-[10px] font-semibold text-slate-400 block -mt-1 tracking-wider uppercase">
-                  Travel & Logistics
-                </span>
-              </div>
+              <TopRideLogo size="md" showText={true} />
             </button>
 
             {/* Desktop Navigation Links */}
@@ -206,12 +198,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onNavigateTab('home')}
               className="flex items-center gap-2 cursor-pointer focus:outline-hidden"
             >
-              <div className="w-8 h-8 rounded-lg bg-slate-950 flex items-center justify-center text-white font-black text-xs">
-                TOP
-              </div>
-              <span className="font-black text-lg tracking-tight text-slate-900">
-                TopRide
-              </span>
+              <TopRideLogo size="sm" />
             </button>
           )}
 

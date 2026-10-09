@@ -76,10 +76,74 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </div>
 
-      {/* ================= DESKTOP / TABLET HERO SEARCH BAR ================= */}
+      {/* ================= FIGMA HERO: "HEADING SOMEWHERE?" ================= */}
+      <div className="space-y-3">
+        <h1 className="text-3xl sm:text-4xl font-black text-[#1A1D20] tracking-tight">
+          Heading somewhere?
+        </h1>
+        <p className="text-slate-500 text-sm sm:text-base">
+          Find a comfortable ride, share your empty seats, or send luggage securely.
+        </p>
+      </div>
+
+      {/* ================= 3 PROMINENT ACTION CARDS (FROM FIGMA) ================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* 1. Find a ride */}
+        <button
+          onClick={() => onNavigateScreen('find')}
+          className="p-6 rounded-3xl bg-white hover:bg-slate-50/80 border border-slate-200 text-left transition-all hover:shadow-md cursor-pointer group relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+        >
+          <div className="w-13 h-13 rounded-2xl bg-[#F05A28]/10 text-[#F05A28] group-hover:bg-[#F05A28] group-hover:text-white flex items-center justify-center transition-colors shadow-2xs">
+            <Car className="w-7 h-7" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="font-black text-xl text-[#1A1D20]">Find a ride</span>
+              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-[#F05A28] group-hover:translate-x-1 transition-all" />
+            </div>
+            <p className="text-xs text-slate-500 mt-1">Book a verified seat at fair shared cost</p>
+          </div>
+        </button>
+
+        {/* 2. Post a trip */}
+        <button
+          onClick={() => onNavigateScreen('post-trip')}
+          className="p-6 rounded-3xl bg-white hover:bg-slate-50/80 border border-slate-200 text-left transition-all hover:shadow-md cursor-pointer group relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+        >
+          <div className="w-13 h-13 rounded-2xl bg-slate-100 text-slate-900 group-hover:bg-[#1A1D20] group-hover:text-white flex items-center justify-center transition-colors shadow-2xs">
+            <PlusCircle className="w-7 h-7" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="font-black text-xl text-[#1A1D20]">Post a ride</span>
+              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-[#1A1D20] group-hover:translate-x-1 transition-all" />
+            </div>
+            <p className="text-xs text-slate-500 mt-1">Driving? Fill your empty seats &amp; offset fuel</p>
+          </div>
+        </button>
+
+        {/* 3. Send Luggage */}
+        <button
+          onClick={() => onNavigateScreen('luggage')}
+          className="p-6 rounded-3xl bg-white hover:bg-slate-50/80 border border-slate-200 text-left transition-all hover:shadow-md cursor-pointer group relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+        >
+          <div className="w-13 h-13 rounded-2xl bg-amber-50 text-amber-700 group-hover:bg-amber-600 group-hover:text-white flex items-center justify-center transition-colors shadow-2xs">
+            <Package className="w-7 h-7" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="font-black text-xl text-[#1A1D20]">Send luggage</span>
+              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 group-hover:translate-x-1 transition-all" />
+            </div>
+            <p className="text-xs text-slate-500 mt-1">Send parcels or items with trusted travelers</p>
+          </div>
+        </button>
+      </div>
+
+      {/* ================= SEARCH WIDGET CARD ================= */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200">
         <h2 className="text-base sm:text-lg font-bold text-slate-900 mb-4 flex items-center justify-between">
-          <span>Search or match journeys</span>
+          <span>Search carpools &amp; routes</span>
           <span className="text-xs font-normal text-slate-500">City, Campus, Airport or Exact Point</span>
         </h2>
 
@@ -138,15 +202,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
               const dateVal = (document.getElementById('hero-date') as HTMLInputElement)?.value || 'Sat, 10 Oct';
               onQuickSearch(fromVal, toVal, dateVal, 'passenger');
             }}
-            className="w-full py-3.5 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-3.5 px-6 rounded-2xl bg-[#F05A28] hover:bg-[#d84a1b] text-white font-bold text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
             <Search className="w-4 h-4" />
-            <span>Search trips</span>
+            <span>Search rides</span>
           </button>
         </div>
       </div>
 
-      {/* ================= ACTIVE / UPCOMING TRIP BANNER (IF ANY) ================= */}
+          {/* ================= ACTIVE / UPCOMING TRIP BANNER (IF ANY) ================= */}
       {(bookedTrip || driverTrip) && (
         <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-3xl p-5 sm:p-6 shadow-md relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
@@ -206,61 +270,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </button>
         </div>
         <MapPreview origin="Bengaluru" destination="Hyderabad" height="h-60 sm:h-72" />
-      </div>
-
-      {/* ================= WHAT DO YOU NEED? (QUICK ACTION GRID) ================= */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-slate-900">What would you like to do?</h2>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-          {/* 1. Find a ride */}
-          <button
-            onClick={() => onNavigateScreen('find')}
-            className="p-5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-left transition-all hover:shadow-sm cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:bg-slate-900 group-hover:text-white text-slate-900 flex items-center justify-center mb-4 transition-colors">
-              <Car className="w-6 h-6" />
-            </div>
-            <div className="font-black text-slate-950 text-base">Find a ride</div>
-            <div className="text-xs text-slate-500 mt-1">Book a seat with a verified driver</div>
-          </button>
-
-          {/* 2. Post a trip */}
-          <button
-            onClick={() => onNavigateScreen('post-trip')}
-            className="p-5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-left transition-all hover:shadow-sm cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:bg-slate-900 group-hover:text-white text-slate-900 flex items-center justify-center mb-4 transition-colors">
-              <PlusCircle className="w-6 h-6" />
-            </div>
-            <div className="font-black text-slate-950 text-base">Post a trip</div>
-            <div className="text-xs text-slate-500 mt-1">I’m driving and have empty seats</div>
-          </button>
-
-          {/* 3. Send Luggage */}
-          <button
-            onClick={() => onNavigateScreen('luggage')}
-            className="p-5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-left transition-all hover:shadow-sm cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:bg-slate-900 group-hover:text-white text-slate-900 flex items-center justify-center mb-4 transition-colors">
-              <Package className="w-6 h-6" />
-            </div>
-            <div className="font-black text-slate-950 text-base">Send luggage</div>
-            <div className="text-xs text-slate-500 mt-1">Send parcels with travelers</div>
-          </button>
-
-          {/* 4. Post Passenger Request */}
-          <button
-            onClick={() => onNavigateScreen('post-request')}
-            className="p-5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-left transition-all hover:shadow-sm cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:bg-slate-900 group-hover:text-white text-slate-900 flex items-center justify-center mb-4 transition-colors">
-              <UserCheck className="w-6 h-6" />
-            </div>
-            <div className="font-black text-slate-950 text-base">Post request</div>
-            <div className="text-xs text-slate-500 mt-1">Need a custom ride or timing</div>
-          </button>
-        </div>
       </div>
 
       {/* ================= POPULAR ROUTES & HIGHLIGHTS ================= */}
