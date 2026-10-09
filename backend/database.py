@@ -2873,7 +2873,14 @@ def insert_vehicle_in_db(
             year=payload.year,
             color=payload.color,
             plateNumber=payload.plateNumber.strip(),
-            isDefault=payload.isDefault or False
+            isDefault=payload.isDefault or False,
+            type=payload.type or "Sedan",
+            luggageCapacity=payload.luggageCapacity or "M",
+            winterTyres=payload.winterTyres or False,
+            snowboards=payload.snowboards or False,
+            bikes=payload.bikes or False,
+            pets=payload.pets or False,
+            photoUrl=payload.photoUrl
         )
     except Exception as e:
         print(f"[Supabase] insert_vehicle_in_db error: {e}")

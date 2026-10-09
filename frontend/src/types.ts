@@ -68,6 +68,13 @@ export interface Vehicle {
   color: string;
   plateNumber: string;
   isDefault?: boolean;
+  type?: string;
+  luggageCapacity?: 'No luggage' | 'S' | 'M' | 'L';
+  winterTyres?: boolean;
+  snowboards?: boolean;
+  bikes?: boolean;
+  pets?: boolean;
+  photoUrl?: string;
 }
 
 export interface LocationData {

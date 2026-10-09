@@ -47,6 +47,13 @@ class VehicleSchema(BaseModel):
     color: str
     plateNumber: str
     isDefault: Optional[bool] = False
+    type: Optional[str] = "Sedan"
+    luggageCapacity: Optional[str] = "M"
+    winterTyres: Optional[bool] = False
+    snowboards: Optional[bool] = False
+    bikes: Optional[bool] = False
+    pets: Optional[bool] = False
+    photoUrl: Optional[str] = None
 
 class VehicleCreate(BaseModel):
     make: str
@@ -55,6 +62,13 @@ class VehicleCreate(BaseModel):
     color: str
     plateNumber: str
     isDefault: Optional[bool] = False
+    type: Optional[str] = "Sedan"
+    luggageCapacity: Optional[str] = "M"
+    winterTyres: Optional[bool] = False
+    snowboards: Optional[bool] = False
+    bikes: Optional[bool] = False
+    pets: Optional[bool] = False
+    photoUrl: Optional[str] = None
 
 # ================= TRIP SCHEMAS =================
 class TripSchema(BaseModel):
