@@ -208,84 +208,84 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
             </div>
           </div>
 
-          {/* ================= FIGMA SEATING PLAN CARD ================= */}
+          {/* ================= AUTHORITATIVE VEHICLE SEATING CAPACITY CARD ================= */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Cabin Seating Plan</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Spacious seating with max 2 passengers in back row</p>
+                <h2 className="text-base font-bold text-slate-900">Vehicle Seating Capacity</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Comfortable carpool layout with {trip.totalSeats} total passenger seats
+                </p>
               </div>
-              <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-200">
-                {trip.availableSeats} of {trip.totalSeats} seats open
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                Math.max(0, Math.min(trip.totalSeats, trip.availableSeats)) > 0
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}>
+                {Math.max(0, Math.min(trip.totalSeats, trip.availableSeats))} of {trip.totalSeats} seats available
               </span>
             </div>
 
-            {/* Cabin Layout Graphic */}
+            {/* Non-Interactive Vehicle Layout Diagram */}
             <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 max-w-sm mx-auto space-y-4">
               <div className="text-center text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Front of Vehicle (Dashboard)
+                Vehicle Cabin Overview
               </div>
 
-              {/* Front Row */}
+              {/* Front Row (Driver + Front Passenger) */}
               <div className="flex justify-around items-center">
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-800 text-white flex flex-col items-center justify-center text-xs font-bold shadow-xs">
-                    <span className="text-base">🚗</span>
-                    <span className="text-[9px]">Driver</span>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-14 h-12 rounded-2xl bg-slate-900 text-white flex flex-col items-center justify-center text-xs font-bold shadow-xs">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Steering</span>
+                    <span className="text-xs">Driver</span>
                   </div>
                   <span className="text-[10px] text-slate-500 font-medium">{trip.driverName.split(' ')[0]}</span>
                 </div>
 
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-12 h-12 rounded-2xl border-2 flex flex-col items-center justify-center text-xs font-bold shadow-xs ${
-                    trip.availableSeats >= 1 ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-400'
-                  }`}>
-                    <span className="text-sm">💺</span>
-                    <span className="text-[9px]">Front</span>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-14 h-12 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 flex flex-col items-center justify-center text-xs font-bold shadow-xs">
+                    <span className="text-[10px] text-slate-400">Front</span>
+                    <span className="text-xs">Passenger</span>
                   </div>
-                  <span className="text-[10px] text-emerald-600 font-semibold">
-                    {trip.availableSeats >= 1 ? 'Available' : 'Booked'}
-                  </span>
+                  <span className="text-[10px] text-slate-400">Standard</span>
                 </div>
               </div>
 
-              {/* Center Divider / Armrest */}
+              {/* Divider */}
               <div className="w-full h-px bg-slate-200"></div>
 
-              {/* Rear Row */}
+              {/* Rear Row (Passenger Seating) */}
               <div className="flex justify-around items-center">
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-12 h-12 rounded-2xl border-2 flex flex-col items-center justify-center text-xs font-bold shadow-xs ${
-                    trip.availableSeats >= 2 ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-400'
-                  }`}>
-                    <span className="text-sm">💺</span>
-                    <span className="text-[9px]">Back L</span>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-14 h-12 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 flex flex-col items-center justify-center text-xs font-bold shadow-xs">
+                    <span className="text-[10px] text-slate-400">Rear</span>
+                    <span className="text-xs">Left</span>
                   </div>
-                  <span className="text-[10px] text-emerald-600 font-semibold">
-                    {trip.availableSeats >= 2 ? 'Available' : 'Booked'}
-                  </span>
+                  <span className="text-[10px] text-slate-400">Window</span>
                 </div>
 
-                {/* Middle (blocked for passenger comfort if 3 total seats) */}
-                <div className="flex flex-col items-center gap-1 opacity-50">
-                  <div className="w-10 h-10 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center text-[10px] font-bold text-slate-500">
+                <div className="flex flex-col items-center gap-1.5 opacity-60">
+                  <div className="w-10 h-10 rounded-xl bg-slate-200/80 border border-slate-300 flex items-center justify-center text-[10px] font-bold text-slate-500">
                     Space
                   </div>
-                  <span className="text-[9px] text-slate-400">Empty</span>
+                  <span className="text-[9px] text-slate-400">Comfort</span>
                 </div>
 
-                <div className="flex flex-col items-center gap-1">
-                  <div className={`w-12 h-12 rounded-2xl border-2 flex flex-col items-center justify-center text-xs font-bold shadow-xs ${
-                    trip.availableSeats >= 3 ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-400'
-                  }`}>
-                    <span className="text-sm">💺</span>
-                    <span className="text-[9px]">Back R</span>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-14 h-12 rounded-2xl bg-white border-2 border-slate-200 text-slate-700 flex flex-col items-center justify-center text-xs font-bold shadow-xs">
+                    <span className="text-[10px] text-slate-400">Rear</span>
+                    <span className="text-xs">Right</span>
                   </div>
-                  <span className="text-[10px] text-emerald-600 font-semibold">
-                    {trip.availableSeats >= 3 ? 'Available' : 'Booked'}
-                  </span>
+                  <span className="text-[10px] text-slate-400">Window</span>
                 </div>
               </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600 flex justify-between items-center border border-slate-100">
+              <span>Authoritative available capacity:</span>
+              <span className="font-bold text-slate-900">
+                {Math.max(0, Math.min(trip.totalSeats, trip.availableSeats))} of {trip.totalSeats} seats bookable
+              </span>
             </div>
           </div>
 

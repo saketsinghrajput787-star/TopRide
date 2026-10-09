@@ -364,88 +364,76 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
         {/* Step 1 Card */}
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-6">
-          {/* Seat count selector */}
+          {/* Seat count selector (Figma Frame 7 Stepper: [-] [N] [+]) */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
-                How many seats do you need?
-              </h2>
-              <span className="text-xs font-semibold text-slate-500">
-                {maxAvailable} of {trip.totalSeats} available
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                  Seats needed
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  How many passenger seats would you like to book?
+                </p>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                maxAvailable > 0
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}>
+                {maxAvailable} of {trip.totalSeats} seats open
               </span>
             </div>
+
             {maxAvailable === 0 ? (
               <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>This ride is fully booked. Zero seats currently available.</span>
               </div>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2.5">
-                {seatOptions.map((count) => (
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-sm text-slate-900 block">Number of seats</span>
+                  <span className="text-xs text-slate-500">₹{effectiveUnitPrice} per passenger seat</span>
+                </div>
+
+                {/* Figma Stepper */}
+                <div className="flex items-center gap-3">
                   <button
-                    key={count}
                     type="button"
+                    disabled={selectedSeatCount <= 1}
                     onClick={() => {
-                      setSelectedSeatCount(count);
-                      setActiveOrder(null); // Invalidate cached order for new seat count
+                      if (selectedSeatCount > 1) {
+                        setSelectedSeatCount(selectedSeatCount - 1);
+                        setActiveOrder(null);
+                      }
                     }}
-                    className={`py-4 px-3 rounded-2xl border-2 text-center transition-all cursor-pointer ${
-                      selectedSeatCount === count
-                        ? 'border-slate-950 bg-slate-50 font-black text-slate-950 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 font-bold text-slate-600'
-                    }`}
+                    className="w-10 h-10 rounded-full bg-white border border-slate-300 text-slate-800 font-black text-lg flex items-center justify-center hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all active:scale-95 shadow-xs"
+                    aria-label="Decrease seat count"
                   >
-                    <div className="text-xl">{count}</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">{count === 1 ? 'Seat' : 'Seats'}</div>
+                    −
                   </button>
-                ))}
+
+                  <span className="w-8 text-center font-black text-2xl text-slate-900 select-none">
+                    {selectedSeatCount}
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={selectedSeatCount >= maxAvailable}
+                    onClick={() => {
+                      if (selectedSeatCount < maxAvailable) {
+                        setSelectedSeatCount(selectedSeatCount + 1);
+                        setActiveOrder(null);
+                      }
+                    }}
+                    className="w-10 h-10 rounded-full bg-white border border-slate-300 text-slate-800 font-black text-lg flex items-center justify-center hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all active:scale-95 shadow-xs"
+                    aria-label="Increase seat count"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             )}
-          </div>
-
-          {/* Vehicle Cabin Layout */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
-            <span className="text-xs font-bold text-slate-600 block mb-3">Vehicle Cabin Layout</span>
-            <div className="max-w-xs mx-auto border-2 border-dashed border-slate-300 rounded-3xl p-4 bg-white space-y-4">
-              {/* Front row */}
-              <div className="flex justify-between items-center px-4">
-                <div className="w-12 h-12 rounded-xl bg-slate-900 text-white text-[10px] font-bold flex flex-col items-center justify-center">
-                  <span>Driver</span>
-                  <span className="text-[8px] text-slate-400">{trip.driverName.split(' ')[0]}</span>
-                </div>
-                <div className={`w-12 h-12 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center transition-all ${
-                  selectedSeatCount >= 1 ? 'bg-slate-950 text-white ring-2 ring-emerald-500' : 'border-2 border-slate-200 text-slate-400'
-                }`}>
-                  <span>Seat 1</span>
-                  <span className={`text-[8px] ${selectedSeatCount >= 1 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                    {selectedSeatCount >= 1 ? 'You' : 'Free'}
-                  </span>
-                </div>
-              </div>
-              {/* Rear seats */}
-              <div className="grid grid-cols-3 gap-2 px-2 pt-2 border-t border-slate-100">
-                {Array.from({ length: Math.max(3, trip.totalSeats - 1) }, (_, i) => {
-                  const seatNum = i + 2;
-                  if (seatNum > trip.totalSeats) {
-                    return <div key={seatNum} className="h-12 opacity-0" />;
-                  }
-                  const isSelected = seatNum <= selectedSeatCount;
-                  return (
-                    <div
-                      key={seatNum}
-                      className={`h-12 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center transition-all ${
-                        isSelected ? 'bg-slate-950 text-white ring-2 ring-emerald-500' : 'border-2 border-slate-200 text-slate-400'
-                      }`}
-                    >
-                      <span>Seat {seatNum}</span>
-                      <span className={`text-[8px] ${isSelected ? 'text-emerald-300' : 'text-slate-400'}`}>
-                        {isSelected ? 'You' : 'Free'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           {/* Luggage options */}
