@@ -74,15 +74,27 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const [bookingRef, setBookingRef] = useState<string>('TR-90421');
   const [lastOrderId, setLastOrderId] = useState<string>('');
   const [lastPaymentId, setLastPaymentId] = useState<string>('');
+  const [lastSignature, setLastSignature] = useState<string>('');
 
   // Cache existing created order to prevent duplicate Razorpay order creations on repeated clicks
   const [activeOrder, setActiveOrder] = useState<PaymentOrderResponse | null>(null);
 
-  // Calculations
-  const seatFare = trip.pricePerSeat * selectedSeatCount;
+  // Authoritative calculations (uses dynamic market price if available)
+  const effectiveUnitPrice = trip.currentMarketPrice ?? trip.pricePerSeat;
+  const seatFare = effectiveUnitPrice * selectedSeatCount;
   const luggageFee = luggageTier === 'medium' ? 100 : luggageTier === 'heavy' ? 200 : 0;
   const platformFee = 0; // TopRide promo: 0 fee
   const totalAmount = seatFare + luggageFee + platformFee;
+
+  // Authoritative seat availability calculations
+  const maxAvailable = Math.max(0, trip.availableSeats ?? trip.totalSeats ?? 0);
+  const seatOptions = Array.from({ length: maxAvailable }, (_, i) => i + 1);
+
+  React.useEffect(() => {
+    if (maxAvailable > 0 && selectedSeatCount > maxAvailable) {
+      setSelectedSeatCount(maxAvailable);
+    }
+  }, [maxAvailable, selectedSeatCount]);
 
   // Categorize errors cleanly to distinguish seat conflicts (409) from Razorpay failures
   const categorizeError = (err: any): ActivePaymentError => {
@@ -142,6 +154,37 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
       type: 'generic',
       message: typeof err?.detail === 'string' ? err.detail : msg || 'Unable to proceed with checkout. Please try again.',
     };
+  };
+
+  // Retry payment verification in case of temporary verification error without re-charging
+  const handleRetryVerification = async () => {
+    if (!lastPaymentId || !lastOrderId) return;
+    setIsProcessing(true);
+    setPaymentError({ type: 'none' });
+    try {
+      const verifyResult = await api.verifyRazorpayPayment({
+        tripId: trip.id,
+        seatsCount: selectedSeatCount,
+        luggageTier,
+        passengerNotes,
+        razorpayOrderId: lastOrderId,
+        razorpayPaymentId: lastPaymentId,
+        razorpaySignature: lastSignature,
+      });
+
+      const confirmedBooking = verifyResult.booking;
+      setActiveOrder(null);
+      setBookingRef(confirmedBooking.bookingRef);
+      setIsProcessing(false);
+      setStep('confirmed');
+      onConfirmBooking(confirmedBooking.trip || trip, selectedSeatCount, totalAmount);
+      showToast('Payment verified successfully! Booking confirmed.');
+    } catch (err: any) {
+      setIsProcessing(false);
+      const classifiedError = categorizeError(err);
+      setPaymentError(classifiedError);
+      showToast(classifiedError.message);
+    }
   };
 
   // Launch official Razorpay web checkout modal
@@ -245,6 +288,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
           const signature = resp.razorpay_signature || '';
           setLastPaymentId(paymentId);
           setLastOrderId(orderId);
+          setLastSignature(signature);
 
           try {
             // 6. Authoritative backend signature verification & atomic booking
@@ -322,29 +366,41 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-6">
           {/* Seat count selector */}
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 mb-3">
-              How many seats do you need?
-            </h2>
-            <div className="grid grid-cols-4 gap-3">
-              {[1, 2, 3, 4].slice(0, trip.availableSeats || 1).map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  onClick={() => {
-                    setSelectedSeatCount(count);
-                    setActiveOrder(null); // Invalidate cached order for new seat count
-                  }}
-                  className={`py-4 px-3 rounded-2xl border-2 text-center transition-all cursor-pointer ${
-                    selectedSeatCount === count
-                      ? 'border-slate-950 bg-slate-50 font-black text-slate-950 shadow-xs'
-                      : 'border-slate-200 hover:border-slate-300 font-bold text-slate-600'
-                  }`}
-                >
-                  <div className="text-xl">{count}</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{count === 1 ? 'Seat' : 'Seats'}</div>
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                How many seats do you need?
+              </h2>
+              <span className="text-xs font-semibold text-slate-500">
+                {maxAvailable} of {trip.totalSeats} available
+              </span>
             </div>
+            {maxAvailable === 0 ? (
+              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>This ride is fully booked. Zero seats currently available.</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2.5">
+                {seatOptions.map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeatCount(count);
+                      setActiveOrder(null); // Invalidate cached order for new seat count
+                    }}
+                    className={`py-4 px-3 rounded-2xl border-2 text-center transition-all cursor-pointer ${
+                      selectedSeatCount === count
+                        ? 'border-slate-950 bg-slate-50 font-black text-slate-950 shadow-xs'
+                        : 'border-slate-200 hover:border-slate-300 font-bold text-slate-600'
+                    }`}
+                  >
+                    <div className="text-xl">{count}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{count === 1 ? 'Seat' : 'Seats'}</div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Vehicle Cabin Layout */}
@@ -357,22 +413,37 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                   <span>Driver</span>
                   <span className="text-[8px] text-slate-400">{trip.driverName.split(' ')[0]}</span>
                 </div>
-                <div className="w-12 h-12 rounded-xl border-2 border-dashed border-slate-300 text-slate-400 text-[10px] font-bold flex items-center justify-center">
-                  Empty
+                <div className={`w-12 h-12 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center transition-all ${
+                  selectedSeatCount >= 1 ? 'bg-slate-950 text-white ring-2 ring-emerald-500' : 'border-2 border-slate-200 text-slate-400'
+                }`}>
+                  <span>Seat 1</span>
+                  <span className={`text-[8px] ${selectedSeatCount >= 1 ? 'text-emerald-300' : 'text-slate-400'}`}>
+                    {selectedSeatCount >= 1 ? 'You' : 'Free'}
+                  </span>
                 </div>
               </div>
-              {/* Rear row */}
-              <div className="flex justify-between items-center px-4">
-                <div className="w-12 h-12 rounded-xl bg-slate-950 text-white text-[10px] font-bold flex flex-col items-center justify-center ring-2 ring-emerald-500">
-                  <span>Seat 1</span>
-                  <span className="text-[8px] text-emerald-300">You</span>
-                </div>
-                <div className={`w-12 h-12 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center ${
-                  selectedSeatCount >= 2 ? 'bg-slate-950 text-white ring-2 ring-emerald-500' : 'border-2 border-slate-200 text-slate-400'
-                }`}>
-                  <span>Seat 2</span>
-                  <span className="text-[8px] text-slate-400">{selectedSeatCount >= 2 ? 'You' : 'Free'}</span>
-                </div>
+              {/* Rear seats */}
+              <div className="grid grid-cols-3 gap-2 px-2 pt-2 border-t border-slate-100">
+                {Array.from({ length: Math.max(3, trip.totalSeats - 1) }, (_, i) => {
+                  const seatNum = i + 2;
+                  if (seatNum > trip.totalSeats) {
+                    return <div key={seatNum} className="h-12 opacity-0" />;
+                  }
+                  const isSelected = seatNum <= selectedSeatCount;
+                  return (
+                    <div
+                      key={seatNum}
+                      className={`h-12 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center transition-all ${
+                        isSelected ? 'bg-slate-950 text-white ring-2 ring-emerald-500' : 'border-2 border-slate-200 text-slate-400'
+                      }`}
+                    >
+                      <span>Seat {seatNum}</span>
+                      <span className={`text-[8px] ${isSelected ? 'text-emerald-300' : 'text-slate-400'}`}>
+                        {isSelected ? 'You' : 'Free'}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -447,8 +518,13 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
             </div>
 
             <button
+              disabled={maxAvailable === 0}
               onClick={() => setStep('checkout')}
-              className="py-4 px-8 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+              className={`py-4 px-8 rounded-2xl font-bold text-sm transition-all shadow-sm flex items-center gap-2 ${
+                maxAvailable > 0
+                  ? 'bg-slate-950 hover:bg-slate-800 text-white cursor-pointer'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
             >
               <span>Continue to payment</span>
               <ArrowRight className="w-4 h-4" />
@@ -521,7 +597,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               <div className="flex justify-between text-slate-600 items-center">
                 <span>Price Per Seat</span>
                 <span className="font-bold text-slate-950 flex items-center gap-1.5">
-                  ₹{trip.pricePerSeat}
+                  ₹{effectiveUnitPrice}
                   {trip.pricingMetadata?.demandMultiplier && trip.pricingMetadata.demandMultiplier > 1.05 && (
                     <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full font-medium">
                       High demand
@@ -530,7 +606,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                 </span>
               </div>
               <div className="flex justify-between text-slate-600">
-                <span>Fare ({selectedSeatCount} × ₹{trip.pricePerSeat})</span>
+                <span>Fare ({selectedSeatCount} × ₹{effectiveUnitPrice})</span>
                 <span className="font-bold text-slate-900">₹{seatFare}</span>
               </div>
               {luggageFee > 0 && (
@@ -584,14 +660,31 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
             {/* 3. SIGNATURE VERIFICATION FAILED ALERT */}
             {paymentError.type === 'verification_failed' && (
-              <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs space-y-2">
+              <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl text-xs space-y-2.5">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-bold text-rose-900 text-sm">Payment Verification Failed</div>
+                    <div className="font-bold text-rose-900 text-sm">Payment Verification Issue</div>
                     <div className="text-rose-800 mt-0.5">{paymentError.message}</div>
                   </div>
                 </div>
+                {lastSignature && (
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={handleRetryVerification}
+                    className="w-full py-2.5 px-4 bg-rose-900 hover:bg-rose-950 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {isProcessing ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Retrying verification...</span>
+                      </span>
+                    ) : (
+                      <span>Retry Verification (No Re-charge)</span>
+                    )}
+                  </button>
+                )}
               </div>
             )}
 
@@ -628,11 +721,28 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
             {/* 6. GENERIC SERVER / NETWORK ERROR */}
             {paymentError.type === 'generic' && (
-              <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs">
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs space-y-2.5">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <div className="text-rose-800">{paymentError.message}</div>
                 </div>
+                {lastSignature && (
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={handleRetryVerification}
+                    className="w-full py-2.5 px-4 bg-rose-900 hover:bg-rose-950 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {isProcessing ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Retrying verification...</span>
+                      </span>
+                    ) : (
+                      <span>Retry Verification</span>
+                    )}
+                  </button>
+                )}
               </div>
             )}
 
@@ -702,7 +812,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
             {/* Price breakdown */}
             <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
               <div className="flex justify-between text-slate-600">
-                <span>Seat Price ({selectedSeatCount} × ₹{trip.pricePerSeat})</span>
+                <span>Seat Price ({selectedSeatCount} × ₹{effectiveUnitPrice})</span>
                 <span className="font-bold text-slate-900">₹{seatFare}</span>
               </div>
               {luggageFee > 0 && (

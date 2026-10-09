@@ -22,7 +22,7 @@ import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { AuthFlow } from './views/AuthFlow';
 import { HomeView } from './views/HomeView';
-import { FindView } from './views/FindView';
+import { FindView, SavedSearchState } from './views/FindView';
 import { TripDetailsView } from './views/TripDetailsView';
 import { BookingFlow } from './views/BookingFlow';
 import { PostTripView } from './views/PostTripView';
@@ -62,6 +62,7 @@ export function App() {
   const [searchDest, setSearchDest] = useState('Hyderabad');
   const [searchDate, setSearchDate] = useState('Sat, 10 Oct');
   const [searchMode, setSearchMode] = useState<'passenger' | 'driver' | 'luggage'>('passenger');
+  const [savedSearchState, setSavedSearchState] = useState<SavedSearchState | null>(null);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -211,23 +212,50 @@ export function App() {
   }, []);
 
 
+  // Browser History synchronization (popstate listener for browser Back/Forward navigation)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({ screen: currentScreen }, '');
+
+      const handlePopState = (event: PopStateEvent) => {
+        if (event.state && event.state.screen) {
+          setCurrentScreen(event.state.screen);
+          setHistory((prev) => prev.slice(0, -1));
+        } else {
+          setCurrentScreen('home');
+        }
+      };
+
+      window.addEventListener('popstate', handlePopState);
+      return () => window.removeEventListener('popstate', handlePopState);
+    }
+  }, []);
+
   // Navigate to screen with history tracking
   const navigateScreen = (screen: ScreenId) => {
-    setHistory((prev) => [...prev, currentScreen]);
-    setCurrentScreen(screen);
+    if (screen !== currentScreen) {
+      if (typeof window !== 'undefined') {
+        window.history.pushState({ screen }, '');
+      }
+      setHistory((prev) => [...prev, currentScreen]);
+      setCurrentScreen(screen);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Back button handler
   const handleBack = () => {
-    if (history.length > 0) {
+    if (typeof window !== 'undefined' && window.history.state && history.length > 0) {
+      window.history.back();
+    } else if (history.length > 0) {
       const prev = history[history.length - 1];
       setHistory((h) => h.slice(0, -1));
       setCurrentScreen(prev);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       setCurrentScreen('home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Navigate Tab
@@ -296,6 +324,38 @@ export function App() {
         return t;
       })
     );
+
+    // Also update selectedTrip state
+    setSelectedTrip((prev) => {
+      if (prev.id === bookedTrip.id) {
+        return {
+          ...prev,
+          availableSeats: Math.max(0, prev.availableSeats - seatCount),
+          isPassengerTrip: true,
+          bookedSeatCount: seatCount,
+          totalPaid,
+        };
+      }
+      return prev;
+    });
+
+    // Also update savedSearchState if it includes this trip
+    setSavedSearchState((prev) => {
+      if (!prev) return null;
+      const updatedBest = prev.bestMatch && prev.bestMatch.trip.id === bookedTrip.id
+        ? { ...prev.bestMatch, trip: { ...prev.bestMatch.trip, availableSeats: Math.max(0, prev.bestMatch.trip.availableSeats - seatCount) } }
+        : prev.bestMatch;
+      const updatedOthers = prev.otherOptions.map((opt) =>
+        opt.trip.id === bookedTrip.id
+          ? { ...opt, trip: { ...opt.trip, availableSeats: Math.max(0, opt.trip.availableSeats - seatCount) } }
+          : opt
+      );
+      return {
+        ...prev,
+        bestMatch: updatedBest,
+        otherOptions: updatedOthers,
+      };
+    });
 
     // Add notification
     const newNotif: NotificationItem = {
@@ -474,6 +534,7 @@ export function App() {
       showToast(err?.message || 'Cancelled successfully.');
     }
 
+    const releasedSeats = targetTrip?.bookedSeatCount || 1;
     setTrips((prev) =>
       prev.map((t) => {
         if (t.id === tripId) {
@@ -481,12 +542,41 @@ export function App() {
             ...t,
             status: targetTrip?.isDriverTrip ? 'cancelled' : t.status,
             isPassengerTrip: false,
-            availableSeats: !targetTrip?.isDriverTrip ? t.availableSeats + (t.bookedSeatCount || 1) : 0,
+            availableSeats: !targetTrip?.isDriverTrip ? t.availableSeats + releasedSeats : 0,
           };
         }
         return t;
       })
     );
+
+    setSelectedTrip((prev) => {
+      if (prev.id === tripId) {
+        return {
+          ...prev,
+          status: targetTrip?.isDriverTrip ? 'cancelled' : prev.status,
+          isPassengerTrip: false,
+          availableSeats: !targetTrip?.isDriverTrip ? prev.availableSeats + releasedSeats : 0,
+        };
+      }
+      return prev;
+    });
+
+    setSavedSearchState((prev) => {
+      if (!prev) return null;
+      const updatedBest = prev.bestMatch && prev.bestMatch.trip.id === tripId
+        ? { ...prev.bestMatch, trip: { ...prev.bestMatch.trip, availableSeats: !targetTrip?.isDriverTrip ? prev.bestMatch.trip.availableSeats + releasedSeats : 0 } }
+        : prev.bestMatch;
+      const updatedOthers = prev.otherOptions.map((opt) =>
+        opt.trip.id === tripId
+          ? { ...opt, trip: { ...opt.trip, availableSeats: !targetTrip?.isDriverTrip ? opt.trip.availableSeats + releasedSeats : 0 } }
+          : opt
+      );
+      return {
+        ...prev,
+        bestMatch: updatedBest,
+        otherOptions: updatedOthers,
+      };
+    });
     const newNotif: NotificationItem = {
       id: `notif_${Date.now()}`,
       title: targetTrip?.isDriverTrip ? 'Trip Cancelled' : 'Reservation Cancelled',
@@ -620,6 +710,8 @@ export function App() {
             initialDestination={searchDest}
             initialDate={searchDate}
             initialMode={searchMode}
+            savedSearchState={savedSearchState}
+            onSaveSearchState={setSavedSearchState}
             trips={trips}
             passengerRequests={passengerRequests}
             luggagePackages={luggagePackages}

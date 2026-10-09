@@ -10,6 +10,7 @@ import {
   CheckCircle2, 
   MessageSquare, 
   ArrowRight, 
+  ArrowLeft,
   Calendar,
   AlertCircle,
   MapPin,
@@ -29,32 +30,44 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
   onOpenChat,
   onNavigateScreen,
 }) => {
+  const effectiveUnitPrice = trip.currentMarketPrice ?? trip.pricePerSeat;
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* ================= TOP ROUTE HEADER & DATE ================= */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
-              {trip.date}
-            </span>
-            {trip.instantBooking && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-amber-600" />
-                <span>Instant Confirmation</span>
+      {/* ================= TOP BACK BUTTON & ROUTE HEADER ================= */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onNavigateScreen('find')}
+          className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 hover:bg-slate-200 cursor-pointer shrink-0 transition-colors"
+          title="Back to search results"
+          aria-label="Back to search results"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
+                {trip.date}
               </span>
-            )}
+              {trip.instantBooking && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-600" />
+                  <span>Instant Confirmation</span>
+                </span>
+              )}
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">
+              {trip.origin} → {trip.destination}
+            </h1>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">
-            {trip.origin} → {trip.destination}
-          </h1>
-        </div>
 
-        <div className="text-left sm:text-right">
-          <div className="text-3xl font-black text-slate-950">
-            {trip.currency}{trip.pricePerSeat}
+          <div className="text-left sm:text-right">
+            <div className="text-3xl font-black text-slate-950">
+              {trip.currency}{effectiveUnitPrice}
+            </div>
+            <span className="text-xs text-slate-400 font-medium">per passenger seat</span>
           </div>
-          <span className="text-xs text-slate-400 font-medium">per passenger seat</span>
         </div>
       </div>
 
@@ -239,7 +252,7 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Base Fare</span>
-                <span className="font-bold text-slate-900">{trip.currency}{trip.pricePerSeat}</span>
+                <span className="font-bold text-slate-900">{trip.currency}{effectiveUnitPrice}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Booking Guarantee</span>
@@ -247,7 +260,7 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
               </div>
               <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-950">
                 <span>Total for 1 seat</span>
-                <span>{trip.currency}{trip.pricePerSeat}</span>
+                <span>{trip.currency}{effectiveUnitPrice}</span>
               </div>
             </div>
 

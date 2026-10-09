@@ -20,11 +20,25 @@ import {
   ChevronDown
 } from 'lucide-react';
 
+export interface SavedSearchState {
+  hasSearched: boolean;
+  bestMatch: CandidateMatch | null;
+  otherOptions: CandidateMatch[];
+  totalMatchesCount: number;
+  origin: string;
+  destination: string;
+  dateIso: string;
+  originCoords: { latitude: number; longitude: number } | null;
+  destCoords: { latitude: number; longitude: number } | null;
+}
+
 interface FindViewProps {
   initialOrigin?: string;
   initialDestination?: string;
   initialDate?: string;
   initialMode?: 'passenger' | 'driver' | 'luggage';
+  savedSearchState?: SavedSearchState | null;
+  onSaveSearchState?: (state: SavedSearchState) => void;
   trips: Trip[];
   passengerRequests: PassengerRequest[];
   luggagePackages: LuggagePackage[];
@@ -39,6 +53,8 @@ export const FindView: React.FC<FindViewProps> = ({
   initialDestination = 'Hyderabad',
   initialDate = '2026-10-10',
   initialMode = 'passenger',
+  savedSearchState,
+  onSaveSearchState,
   passengerRequests,
   luggagePackages,
   onSelectTrip,
@@ -49,14 +65,14 @@ export const FindView: React.FC<FindViewProps> = ({
   // Mode: passenger | driver | luggage
   const [mode, setMode] = useState<'passenger' | 'driver' | 'luggage'>(initialMode);
   
-  // Search inputs & coordinates
-  const [origin, setOrigin] = useState(initialOrigin);
-  const [destination, setDestination] = useState(initialDestination);
-  const [originCoords, setOriginCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [destCoords, setDestCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  // Search inputs & coordinates (Restored from saved state if returning via Back button)
+  const [origin, setOrigin] = useState(() => savedSearchState?.origin ?? initialOrigin);
+  const [destination, setDestination] = useState(() => savedSearchState?.destination ?? initialDestination);
+  const [originCoords, setOriginCoords] = useState<{ latitude: number; longitude: number } | null>(() => savedSearchState?.originCoords ?? null);
+  const [destCoords, setDestCoords] = useState<{ latitude: number; longitude: number } | null>(() => savedSearchState?.destCoords ?? null);
   
   // Canonical ISO date format: YYYY-MM-DD
-  const [dateIso, setDateIso] = useState<string>(() => toCanonicalIsoDate(initialDate));
+  const [dateIso, setDateIso] = useState<string>(() => savedSearchState?.dateIso ?? toCanonicalIsoDate(initialDate));
 
   // Filters & Sorting
   const [sortBy, setSortBy] = useState<'best' | 'cheapest' | 'earliest' | 'rating'>('best');
@@ -66,14 +82,18 @@ export const FindView: React.FC<FindViewProps> = ({
   const [timeFilter, setTimeFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening'>('all');
   const [showFilterModal, setShowFilterModal] = useState(false);
   
-  // Search & Matching State (IDLE BY DEFAULT: hasSearched is false, 0 API calls on mount)
+  // Search & Matching State (Restores saved results without triggering re-fetch; idle on fresh mount)
   const [isLoading, setIsLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [bestMatch, setBestMatch] = useState<CandidateMatch | null>(null);
-  const [otherOptions, setOtherOptions] = useState<CandidateMatch[]>([]);
-  const [totalMatchesCount, setTotalMatchesCount] = useState<number>(0);
+  const [hasSearched, setHasSearched] = useState(() => savedSearchState?.hasSearched ?? false);
+  const [bestMatch, setBestMatch] = useState<CandidateMatch | null>(() => savedSearchState?.bestMatch ?? null);
+  const [otherOptions, setOtherOptions] = useState<CandidateMatch[]>(() => savedSearchState?.otherOptions ?? []);
+  const [totalMatchesCount, setTotalMatchesCount] = useState<number>(() => savedSearchState?.totalMatchesCount ?? 0);
   const [showAllOtherOptions, setShowAllOtherOptions] = useState(false);
-  const [searchSummaryRoute, setSearchSummaryRoute] = useState({ origin: initialOrigin, destination: initialDestination, date: initialDate });
+  const [searchSummaryRoute, setSearchSummaryRoute] = useState(() => ({
+    origin: savedSearchState?.origin ?? initialOrigin,
+    destination: savedSearchState?.destination ?? initialDestination,
+    date: savedSearchState?.dateIso ? formatDisplayDate(savedSearchState.dateIso) : initialDate,
+  }));
 
   // Race-condition & double-click protection refs
   const inFlightRef = useRef(false);
@@ -153,13 +173,36 @@ export const FindView: React.FC<FindViewProps> = ({
       if (matchRes && matchRes.status === 'matched') {
         const best = matchRes.best_match || (matchRes.candidates && matchRes.candidates[0]) || null;
         const others = matchRes.other_options || (matchRes.candidates ? matchRes.candidates.slice(1) : []);
+        const total = matchRes.total_matches ?? (matchRes.candidates?.length || (best ? 1 + others.length : 0));
         setBestMatch(best);
         setOtherOptions(others);
-        setTotalMatchesCount(matchRes.total_matches ?? (matchRes.candidates?.length || (best ? 1 + others.length : 0)));
+        setTotalMatchesCount(total);
+        onSaveSearchState?.({
+          hasSearched: true,
+          bestMatch: best,
+          otherOptions: others,
+          totalMatchesCount: total,
+          origin: trimmedOrigin,
+          destination: trimmedDest,
+          dateIso,
+          originCoords,
+          destCoords,
+        });
       } else {
         setBestMatch(null);
         setOtherOptions([]);
         setTotalMatchesCount(0);
+        onSaveSearchState?.({
+          hasSearched: true,
+          bestMatch: null,
+          otherOptions: [],
+          totalMatchesCount: 0,
+          origin: trimmedOrigin,
+          destination: trimmedDest,
+          dateIso,
+          originCoords,
+          destCoords,
+        });
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') {

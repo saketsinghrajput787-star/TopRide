@@ -300,7 +300,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                 Available Seats
               </label>
               <div className="flex gap-2">
-                {[1, 2, 3, 4, 5].map((s) => (
+                {[1, 2, 3, 4, 5, 6].map((s) => (
                   <button
                     key={s}
                     type="button"

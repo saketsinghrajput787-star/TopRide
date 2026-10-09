@@ -68,6 +68,7 @@ def to_canonical_iso_date(date_val: Optional[str], default_year: int = 2026) -> 
 
 # Cache for active Razorpay test orders (deduplication / fallback before migration)
 _recent_razorpay_orders: Dict[str, Any] = {}
+_recent_orders_by_id: Dict[str, Any] = {}
 
 # Initial seed data from Phase 1
 INITIAL_USER = UserProfile(
@@ -1375,20 +1376,22 @@ def insert_trip_in_db(
                 print(f"[Supabase] insert_trip_in_db error: {e}")
                 raise HTTPException(status_code=500, detail=f"Database trip insert failed: {str(e)}")
 
-        # Check if database trigger generated seats; if not, insert them
+        # Check if database trigger generated all seats; if not, insert missing seats
         try:
-            existing_seats = c.table("trip_seats").select("id").eq("trip_id", trip_id).execute().data
-            if not existing_seats or len(existing_seats) == 0:
-                seats_payload = [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "trip_id": trip_id,
-                        "seat_number": s,
-                        "status": "available"
-                    }
-                    for s in range(1, payload.totalSeats + 1)
-                ]
-                c.table("trip_seats").insert(seats_payload).execute()
+            existing_seats_res = c.table("trip_seats").select("id, seat_number").eq("trip_id", trip_id).execute()
+            existing_seat_numbers = {s.get("seat_number") for s in (existing_seats_res.data or []) if s.get("seat_number") is not None}
+            missing_seats = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "trip_id": trip_id,
+                    "seat_number": s,
+                    "status": "available"
+                }
+                for s in range(1, payload.totalSeats + 1)
+                if s not in existing_seat_numbers
+            ]
+            if missing_seats:
+                c.table("trip_seats").insert(missing_seats).execute()
         except Exception as e:
             # Atomic rollback: delete trip record if seat generation fails
             print(f"[Supabase] Seat creation failed, rolling back trip {trip_id}: {e}")
@@ -1715,7 +1718,7 @@ def create_razorpay_order_in_db(
                 try:
                     dt = datetime.datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                     now = datetime.datetime.now(datetime.timezone.utc)
-                    if (now - dt).total_seconds() < 1200:  # 20 minutes
+                    if (now - dt).total_seconds() < 1200 and int(existing.get("amount_paise", 0)) == amount_paise:  # 20 minutes and exact amount
                         cached_order = PaymentOrderResponse(
                             orderId=existing["razorpay_order_id"],
                             amount=int(existing["amount_paise"]),
@@ -1771,30 +1774,48 @@ def create_razorpay_order_in_db(
     )
 
     # Save to memory cache for instant deduplication
-    _recent_razorpay_orders[cache_key] = (datetime.datetime.now(datetime.timezone.utc), order_resp)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    _recent_razorpay_orders[cache_key] = (now_utc, order_resp)
+    _recent_orders_by_id[rzp_order["id"]] = {
+        "user_id": user_id,
+        "trip_id": req.tripId,
+        "order_id": rzp_order["id"],
+        "amount": total_rupees,
+        "amount_paise": amount_paise,
+        "seats_count": req.seatsCount,
+        "luggage_tier": req.luggageTier or "small",
+        "receipt": receipt,
+        "status": "created",
+        "created_at": now_utc,
+        "order_resp": order_resp
+    }
 
-    # 8. Persist order in payment_orders table if available
+    # 8. Persist order in payment_orders table reliably
+    order_row = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "trip_id": req.tripId,
+        "razorpay_order_id": rzp_order["id"],
+        "amount": total_rupees,
+        "amount_paise": amount_paise,
+        "currency": "INR",
+        "seats_count": req.seatsCount,
+        "luggage_tier": req.luggageTier or "small",
+        "receipt": receipt,
+        "status": "created",
+        "metadata": {
+            "notes": rzp_order.get("notes", {}),
+            "origin": trip.origin,
+            "destination": trip.destination
+        }
+    }
     try:
-        c.table("payment_orders").insert({
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "trip_id": req.tripId,
-            "razorpay_order_id": rzp_order["id"],
-            "amount": total_rupees,
-            "amount_paise": amount_paise,
-            "currency": "INR",
-            "seats_count": req.seatsCount,
-            "luggage_tier": req.luggageTier or "small",
-            "receipt": receipt,
-            "status": "created",
-            "metadata": {
-                "notes": rzp_order.get("notes", {}),
-                "origin": trip.origin,
-                "destination": trip.destination
-            }
-        }).execute()
-    except Exception as e:
-        print(f"[Supabase] payment_orders insert notice (table pending migration): {e}")
+        supabase_client.table("payment_orders").insert(order_row).execute()
+    except Exception as e_admin:
+        try:
+            c.table("payment_orders").insert(order_row).execute()
+        except Exception as e:
+            print(f"[Supabase] payment_orders insert notice: {e}")
 
     return order_resp
 
@@ -1807,6 +1828,9 @@ def update_payment_status_in_db(
     c = client or supabase_client
 
     # Invalidate / remove from in-memory cache if cancelled or failed
+    if req.orderId in _recent_orders_by_id:
+        _recent_orders_by_id[req.orderId]["status"] = req.status
+
     keys_to_remove = [k for k, v in _recent_razorpay_orders.items() if v[1].orderId == req.orderId]
     for k in keys_to_remove:
         _recent_razorpay_orders.pop(k, None)
@@ -1818,7 +1842,10 @@ def update_payment_status_in_db(
         }
         if req.paymentId:
             update_data["razorpay_payment_id"] = req.paymentId
-        c.table("payment_orders").update(update_data).eq("razorpay_order_id", req.orderId).eq("user_id", user_id).execute()
+        try:
+            supabase_client.table("payment_orders").update(update_data).eq("razorpay_order_id", req.orderId).execute()
+        except Exception:
+            c.table("payment_orders").update(update_data).eq("razorpay_order_id", req.orderId).eq("user_id", user_id).execute()
         return {"success": True}
     except Exception as e:
         print(f"[Supabase] update_payment_status_in_db notice: {e}")
@@ -1869,11 +1896,32 @@ def verify_payment_and_book_in_db(
         )
 
     # 2. Duplicate Payment / Idempotency & User Ownership Check
-    po_admin = supabase_client.table("payment_orders").select("*").eq("razorpay_order_id", req.razorpayOrderId).execute()
-    if not po_admin.data or len(po_admin.data) == 0:
+    po = None
+    try:
+        po_admin = supabase_client.table("payment_orders").select("*").eq("razorpay_order_id", req.razorpayOrderId).execute()
+        if po_admin.data and len(po_admin.data) > 0:
+            po = po_admin.data[0]
+    except Exception as po_err:
+        print(f"[Supabase] payment_orders query notice: {po_err}")
+
+    # Fallback to in-memory order cache if database lookup returned nothing
+    if not po and req.razorpayOrderId in _recent_orders_by_id:
+        cached_info = _recent_orders_by_id[req.razorpayOrderId]
+        po = {
+            "user_id": cached_info["user_id"],
+            "trip_id": cached_info["trip_id"],
+            "razorpay_order_id": cached_info["order_id"],
+            "amount": cached_info["amount"],
+            "amount_paise": cached_info["amount_paise"],
+            "seats_count": cached_info["seats_count"],
+            "luggage_tier": cached_info["luggage_tier"],
+            "status": cached_info.get("status", "created"),
+            "booking_id": cached_info.get("booking_id")
+        }
+
+    if not po:
         raise HTTPException(status_code=404, detail="Payment order not found.")
 
-    po = po_admin.data[0]
     if str(po.get("user_id")) != user_id:
         raise HTTPException(
             status_code=403,
@@ -1940,7 +1988,11 @@ def verify_payment_and_book_in_db(
 
     booking_resp = create_booking_in_db(passenger_id=user_id, payload=booking_payload, client=c)
 
-    # 4. Invalidate in-memory order cache
+    # 4. Invalidate / update in-memory order cache
+    if req.razorpayOrderId in _recent_orders_by_id:
+        _recent_orders_by_id[req.razorpayOrderId]["status"] = "paid"
+        _recent_orders_by_id[req.razorpayOrderId]["booking_id"] = booking_resp.id
+
     keys_to_remove = [k for k, v in _recent_razorpay_orders.items() if v[1].orderId == req.razorpayOrderId]
     for k in keys_to_remove:
         _recent_razorpay_orders.pop(k, None)
@@ -2164,6 +2216,25 @@ def create_booking_in_db(
     luggage_fee = 100.0 if payload.luggageTier == "medium" else (200.0 if payload.luggageTier == "heavy" else 0.0)
     unit_price = float(trip_for_price.currentMarketPrice if trip_for_price.currentMarketPrice is not None else trip_for_price.pricePerSeat)
     authoritative_total = round(unit_price * payload.seatsCount + luggage_fee, 2)
+
+    # Ensure all seats up to totalSeats exist in trip_seats ledger so book_trip_seats RPC never fails on missing rows
+    try:
+        existing_s = supabase_client.table("trip_seats").select("seat_number").eq("trip_id", payload.tripId).execute()
+        existing_nums = {s.get("seat_number") for s in (existing_s.data or []) if s.get("seat_number") is not None}
+        missing_seats = [
+            {
+                "id": str(uuid.uuid4()),
+                "trip_id": payload.tripId,
+                "seat_number": s,
+                "status": "available"
+            }
+            for s in range(1, trip_for_price.totalSeats + 1)
+            if s not in existing_nums
+        ]
+        if missing_seats:
+            supabase_client.table("trip_seats").insert(missing_seats).execute()
+    except Exception as s_ledger_err:
+        print(f"[Supabase] seat ledger reconciliation notice: {s_ledger_err}")
 
     try:
         rpc_res = c.rpc("book_trip_seats", {
