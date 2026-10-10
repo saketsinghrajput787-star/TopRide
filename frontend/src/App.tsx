@@ -615,6 +615,19 @@ export function App() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    }
+    setUser(null);
+    setConversations([]);
+    setActiveChatConvId('');
+    navigateScreen('welcome');
+    showToast('Logged out of TopRide');
+  };
 
   const isAuthScreen = [
     'welcome',
@@ -662,6 +675,7 @@ export function App() {
           onNavigateTab={navigateTab}
           onNavigateScreen={navigateScreen}
           onBack={handleBack}
+          onLogout={handleLogout}
           unreadCount={unreadNotifsCount}
           unreadMessagesCount={unreadMessagesCount}
           user={user}
@@ -835,18 +849,7 @@ export function App() {
             }}
             onRequestPayout={handleRequestPayout}
             onNavigateScreen={navigateScreen}
-            onLogout={async () => {
-              try {
-                await supabase.auth.signOut();
-              } catch (err) {
-                console.warn('Sign out error:', err);
-              }
-              setUser(null);
-              setConversations([]);
-              setActiveChatConvId('');
-              navigateScreen('welcome');
-              showToast('Logged out of TopRide');
-            }}
+            onLogout={handleLogout}
             showToast={showToast}
           />
         )}

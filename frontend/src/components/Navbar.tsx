@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavigationTab, ScreenId, User } from '../types';
-import { Bell, Plus, ArrowLeft, ShieldCheck } from 'lucide-react';
+import { Bell, Plus, ArrowLeft, ShieldCheck, LogOut } from 'lucide-react';
 import { TopRideLogo } from './TopRideLogo';
 
 interface NavbarProps {
@@ -9,6 +9,7 @@ interface NavbarProps {
   onNavigateTab: (tab: NavigationTab) => void;
   onNavigateScreen: (screen: ScreenId) => void;
   onBack: () => void;
+  onLogout?: () => void;
   unreadCount: number;
   unreadMessagesCount: number;
   user: User;
@@ -21,6 +22,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigateTab,
   onNavigateScreen,
   onBack,
+  onLogout,
   unreadCount,
   unreadMessagesCount,
   user,
@@ -178,6 +180,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
               )}
             </button>
+
+            {/* Desktop Log Out Button */}
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('Are you sure you want to log out of TopRide?')) {
+                    onLogout();
+                  }
+                }}
+                className="p-2.5 rounded-xl border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-slate-500 hover:text-rose-600 transition-colors cursor-pointer flex items-center gap-1.5"
+                title="Log out"
+                aria-label="Log out"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="text-xs font-semibold hidden xl:inline">Log out</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -230,6 +250,23 @@ export const Navbar: React.FC<NavbarProps> = ({
               aria-label="Post trip"
             >
               <Plus className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Quick Logout button on Account screen */}
+          {onLogout && currentScreen.startsWith('account') && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Are you sure you want to log out of TopRide?')) {
+                  onLogout();
+                }
+              }}
+              className="w-9 h-9 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           )}
         </div>

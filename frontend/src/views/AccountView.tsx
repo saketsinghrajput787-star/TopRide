@@ -20,7 +20,8 @@ import {
   Sparkles,
   Snowflake,
   Bike,
-  Dog
+  Dog,
+  LogOut
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -120,6 +121,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     { id: 'security', label: 'Security & password', icon: <Lock className="w-5 h-5 text-slate-700" /> },
     { id: 'language', label: 'Language', icon: <Globe className="w-5 h-5 text-slate-700" /> },
     { id: 'referrals', label: 'Referrals & credits', icon: <Gift className="w-5 h-5 text-slate-700" /> },
+    { id: 'logout', label: 'Log out', icon: <LogOut className="w-5 h-5 text-rose-600" />, danger: true },
     { id: 'close', label: 'Close account', icon: <AlertCircle className="w-5 h-5 text-rose-600" />, danger: true },
   ];
 
@@ -206,6 +208,20 @@ export const AccountView: React.FC<AccountViewProps> = ({
           >
             Withdraw
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm('Are you sure you want to log out of TopRide?')) {
+                onLogout();
+              }
+            }}
+            className="px-3.5 py-2.5 rounded-2xl border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+            title="Log out"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Log out</span>
+          </button>
         </div>
       </div>
 
@@ -217,6 +233,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
             <button
               key={item.id}
               onClick={() => {
+                if (item.id === 'logout') {
+                  if (confirm('Are you sure you want to log out of TopRide?')) {
+                    onLogout();
+                  }
+                  return;
+                }
                 setActiveSection(item.id);
                 if (item.id === 'vehicles') setVehicleSubView('list');
               }}
@@ -234,6 +256,21 @@ export const AccountView: React.FC<AccountViewProps> = ({
               </div>
             </button>
           ))}
+
+          <div className="pt-3 mt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Are you sure you want to log out of TopRide?')) {
+                  onLogout();
+                }
+              }}
+              className="w-full flex items-center gap-3 p-3.5 rounded-2xl text-left text-rose-600 hover:bg-rose-50 font-bold transition-colors cursor-pointer"
+            >
+              <LogOut className="w-5 h-5 text-rose-600" />
+              <span className="text-sm">Log out</span>
+            </button>
+          </div>
         </div>
 
         {/* Right Content Area */}
@@ -1206,6 +1243,33 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 <p className="text-xs text-slate-600">
                   Invite fellow travelers. They get ₹100 off their first booking, and you receive ₹150 in ride credits!
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* 9.5 LOG OUT */}
+          {activeSection === 'logout' && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-black text-slate-950">Log Out</h2>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                You will be signed out of your TopRide account on this device.
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="py-3 px-6 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer flex items-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Log out now</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('profile')}
+                  className="py-3 px-6 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           )}
