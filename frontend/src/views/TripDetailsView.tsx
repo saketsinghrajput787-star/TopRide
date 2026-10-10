@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trip, ScreenId } from '../types';
 import { MapPreview } from '../components/MapPreview';
+import { DriverProfileModal } from '../components/DriverProfileModal';
 import { 
   Star, 
   ShieldCheck, 
@@ -14,7 +15,8 @@ import {
   Calendar,
   AlertCircle,
   MapPin,
-  Sparkles
+  Sparkles,
+  User as UserIcon
 } from 'lucide-react';
 
 interface TripDetailsViewProps {
@@ -30,6 +32,7 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
   onOpenChat,
   onNavigateScreen,
 }) => {
+  const [showDriverModal, setShowDriverModal] = useState(false);
   const effectiveUnitPrice = trip.currentMarketPrice ?? trip.pricePerSeat;
 
   return (
@@ -181,13 +184,25 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={() => onOpenChat(trip.driverId, trip.driverName)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Message</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDriverModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                  title="View driver profile"
+                >
+                  <UserIcon className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Profile</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenChat(trip.driverId, trip.driverName)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Message</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 text-xs">
@@ -373,6 +388,16 @@ export const TripDetailsView: React.FC<TripDetailsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Driver Profile Modal (Figma Frame 1038:1219) */}
+      <DriverProfileModal
+        isOpen={showDriverModal}
+        onClose={() => setShowDriverModal(false)}
+        driverName={trip.driverName}
+        driverRating={trip.driverRating}
+        driverTripsCount={trip.driverTripsCount}
+        isVerified={trip.driverIsVerified}
+      />
     </div>
   );
 };

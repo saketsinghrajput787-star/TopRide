@@ -57,7 +57,21 @@ export const AccountView: React.FC<AccountViewProps> = ({
   // Sub-view for Vehicles: 'list' (Frame 877:2634) vs 'add' (Frame 877:2884 / 1038:1219)
   const [vehicleSubView, setVehicleSubView] = useState<'list' | 'add'>('list');
 
-  // Form states for Personal Details
+  // Form states for Personal Details (Figma Frame 3-edit_profile_info)
+  const initialNames = (user.name || '').split(' ');
+  const [firstName, setFirstName] = useState(initialNames[0] || '');
+  const [lastName, setLastName] = useState(initialNames.slice(1).join(' ') || '');
+  const [dobDay, setDobDay] = useState('15');
+  const [dobMonth, setDobMonth] = useState('08');
+  const [dobYear, setDobYear] = useState('1998');
+  const [gender, setGender] = useState('Male');
+  const [idProofNumber, setIdProofNumber] = useState('');
+  const [idDobDay, setIdDobDay] = useState('15');
+  const [idDobMonth, setIdDobMonth] = useState('08');
+  const [idDobYear, setIdDobYear] = useState('1998');
+  const [idFileSelected, setIdFileSelected] = useState(false);
+  const [payoutTab, setPayoutTab] = useState<'pending' | 'paid'>('pending');
+  const [payoutFilterYear, setPayoutFilterYear] = useState('2026');
   const [name, setName] = useState(user.name || '');
   const [email, setEmail] = useState(user.email || '');
   const [phone, setPhone] = useState(user.phone || '');
@@ -224,33 +238,126 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
         {/* Right Content Area */}
         <div className="md:col-span-8 p-6 sm:p-8">
-          {/* 1. PROFILE DETAILS */}
+          {/* 1. PROFILE DETAILS (Figma Frame 3-edit_profile_info) */}
           {activeSection === 'profile' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-black text-slate-950">Personal Details</h2>
-                <p className="text-xs text-slate-500">Manage your public passenger & driver profile</p>
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h2 className="text-xl font-black text-slate-950">Personal Details</h2>
+                  <p className="text-xs text-slate-500">Manage your profile and community identity</p>
+                </div>
+              </div>
+
+              {/* Phone number row with Change button */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Phone number</span>
+                  <span className="font-bold text-sm text-slate-900">{phone || '+91 9876543210'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newP = prompt('Enter new phone number:', phone);
+                    if (newP) setPhone(newP);
+                  }}
+                  className="text-xs font-bold text-[#F05A28] hover:underline cursor-pointer"
+                >
+                  Change
+                </button>
+              </div>
+
+              {/* Figma Frame 3 Pink Alert Box */}
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs space-y-1">
+                <div className="font-bold text-rose-900">Please note:</div>
+                <p className="text-rose-700 leading-relaxed">
+                  You can verify your name by uploading a piece of your ID proof. Being verified makes you more trustworthy and appealing to other user as both driver and passenger!
+                </p>
               </div>
 
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  onUpdateUser({ name, email, phone, bio });
+                  const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+                  onUpdateUser({ name: fullName, email, phone, bio });
                   showToast('Profile updated successfully');
                 }}
                 className="space-y-4"
               >
+                {/* First Name & Last Name (Figma side-by-side inputs) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                      First Name
+                    </label>
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="e.g. Saket"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                      Last Name
+                    </label>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="e.g. Rajput"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                  </div>
+                </div>
+
+                {/* Date of Birth Pills (DD MM YYYY) */}
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Full Name
+                    Date of birth
                   </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Enter your full name"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28]"
-                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      maxLength={2}
+                      value={dobDay}
+                      onChange={(e) => setDobDay(e.target.value)}
+                      placeholder="DD"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                    <input
+                      type="text"
+                      maxLength={2}
+                      value={dobMonth}
+                      onChange={(e) => setDobMonth(e.target.value)}
+                      placeholder="MM"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={dobYear}
+                      onChange={(e) => setDobYear(e.target.value)}
+                      placeholder="YYYY"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                  </div>
+                </div>
+
+                {/* Gender Dropdown (Figma) */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28] bg-white cursor-pointer"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
 
                 <div>
@@ -268,23 +375,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98765 43210"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
                     Bio / About Me
                   </label>
                   <textarea
-                    rows={4}
+                    rows={3}
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     placeholder="Tell other travelers about yourself..."
@@ -294,7 +388,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
                 <button
                   type="submit"
-                  className="py-3 px-6 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer active:scale-98"
+                  className="py-3.5 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer active:scale-98 shadow-sm"
                 >
                   Save changes
                 </button>
@@ -656,22 +750,57 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </div>
           )}
 
-          {/* 3. PAYMENTS & PAYOUTS — SAFE TRUTHFUL STATE */}
+          {/* 3. PAYMENTS & PAYOUTS — FIGMA FRAME PAYOUTS */}
           {activeSection === 'payments' && (
             <div className="space-y-6">
-              <h2 className="text-xl font-black text-slate-950">Payments & Payouts</h2>
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h2 className="text-xl font-black text-slate-950">Payouts</h2>
+                
+                {/* Year filter dropdown from Figma */}
+                <select
+                  value={payoutFilterYear}
+                  onChange={(e) => setPayoutFilterYear(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold bg-white text-slate-700 focus:outline-hidden cursor-pointer shadow-2xs"
+                >
+                  <option value="2026">2026</option>
+                  <option value="2025">2025</option>
+                  <option value="2024">2024</option>
+                </select>
+              </div>
+
+              {/* Tabs: Pending vs Paid */}
+              <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+                <button
+                  type="button"
+                  onClick={() => setPayoutTab('pending')}
+                  className={`py-1.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    payoutTab === 'pending' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Pending
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPayoutTab('paid')}
+                  className={`py-1.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    payoutTab === 'paid' ? 'bg-white text-slate-950 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Paid
+                </button>
+              </div>
 
               <div className="p-5 bg-gradient-to-r from-slate-950 to-slate-800 text-white rounded-3xl space-y-3">
                 <span className="text-xs text-slate-300 font-semibold block">Available Payout Balance</span>
                 <div className="text-3xl font-black">₹{user.availablePayout}</div>
                 <p className="text-xs text-slate-400">
-                  Earnings from completed rides are automatically calculated and ready for withdrawal.
+                  Total paid for period: ₹0.00 • Earnings from completed rides are automatically calculated and ready for withdrawal.
                 </p>
               </div>
 
               {/* Request Payout Method */}
               <div className="space-y-3">
-                <h3 className="font-bold text-sm text-slate-900">Request withdrawal</h3>
+                <h3 className="font-bold text-sm text-slate-900">Choose payout method</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className={`p-4 rounded-2xl border-2 transition-all ${
                     payoutMethod === 'bank' ? 'border-slate-950 bg-slate-50' : 'border-slate-200'
@@ -735,10 +864,11 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </div>
           )}
 
-          {/* 4. ID VERIFICATION — TRUTHFUL TO USER STATUS */}
+          {/* 4. ID VERIFICATION — FIGMA FRAME 2. UPLOAD A PHOTO ID */}
           {activeSection === 'id-verify' && (
             <div className="space-y-6">
               <h2 className="text-xl font-black text-slate-950">ID Verification</h2>
+
               {user.isVerified ? (
                 <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3">
                   <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0" />
@@ -761,19 +891,100 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 </div>
               )}
 
-              <div className="space-y-3">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                  Select Document Type
-                </label>
-                <select
-                  value={idType}
-                  onChange={(e) => setIdType(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-hidden bg-white"
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Date of birth
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      maxLength={2}
+                      value={idDobDay}
+                      onChange={(e) => setIdDobDay(e.target.value)}
+                      placeholder="DD"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                    <input
+                      type="text"
+                      maxLength={2}
+                      value={idDobMonth}
+                      onChange={(e) => setIdDobMonth(e.target.value)}
+                      placeholder="MM"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={idDobYear}
+                      onChange={(e) => setIdDobYear(e.target.value)}
+                      placeholder="YYYY"
+                      className="px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-center focus:outline-hidden focus:border-[#F05A28]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    ID proof number *(Mandatory)
+                  </label>
+                  <input
+                    type="text"
+                    value={idProofNumber}
+                    onChange={(e) => setIdProofNumber(e.target.value)}
+                    placeholder="e.g. DL-1420110012345 or Passport Number"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-semibold focus:outline-hidden focus:border-[#F05A28]"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <h3 className="font-bold text-sm text-slate-900">2. Upload a photo ID</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Please upload a high-quality, legible scan of a photo of your passport, driver's license or national ID card
+                  </p>
+                </div>
+
+                {/* 4 Example Photo Cards from Figma */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-800">Driver's License</span>
+                    <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-800">Permanent Resident</span>
+                    <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-400 line-through">Blurry scan</span>
+                    <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold">✕</span>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-400 line-through">Casual selfie</span>
+                    <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs font-bold">✕</span>
+                  </div>
+                </div>
+
+                {/* Dashed upload box */}
+                <div 
+                  onClick={() => setIdFileSelected(true)}
+                  className={`p-6 border-2 border-dashed rounded-3xl text-center space-y-2 cursor-pointer transition-colors ${
+                    idFileSelected ? 'border-emerald-500 bg-emerald-50/40' : 'border-slate-300 bg-slate-50 hover:border-slate-400'
+                  }`}
                 >
-                  <option value="Driving License">Driving License</option>
-                  <option value="Aadhaar Card">Aadhaar Card</option>
-                  <option value="Passport">Passport</option>
-                </select>
+                  <div className="w-12 h-12 rounded-full bg-white shadow-xs border border-slate-200 flex items-center justify-center mx-auto text-slate-700">
+                    <Camera className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">
+                      {idFileSelected ? 'government_id_scan.jpg attached' : 'Upload photo ID'}
+                    </span>
+                    <span className="text-[11px] text-slate-400">Click to browse or drop high resolution photo</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 text-center">
+                  The file will be destroyed by the team after verification
+                </p>
 
                 <button
                   type="button"
@@ -786,9 +997,9 @@ export const AccountView: React.FC<AccountViewProps> = ({
                       showToast(err.message || 'ID verification failed');
                     }
                   }}
-                  className="py-3 px-6 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer transition-colors"
+                  className="w-full py-3.5 px-6 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer transition-colors shadow-sm active:scale-98"
                 >
-                  Upload & verify {idType}
+                  Submit verification
                 </button>
               </div>
             </div>
