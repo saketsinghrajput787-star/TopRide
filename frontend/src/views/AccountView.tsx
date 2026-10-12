@@ -121,7 +121,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
     { id: 'security', label: 'Security & password', icon: <Lock className="w-5 h-5 text-slate-700" /> },
     { id: 'language', label: 'Language', icon: <Globe className="w-5 h-5 text-slate-700" /> },
     { id: 'referrals', label: 'Referrals & credits', icon: <Gift className="w-5 h-5 text-slate-700" /> },
-    { id: 'logout', label: 'Log out', icon: <LogOut className="w-5 h-5 text-rose-600" />, danger: true },
     { id: 'close', label: 'Close account', icon: <AlertCircle className="w-5 h-5 text-rose-600" />, danger: true },
   ];
 
@@ -231,10 +230,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
             <button
               key={item.id}
               onClick={() => {
-                if (item.id === 'logout') {
-                  onLogout();
-                  return;
-                }
                 setActiveSection(item.id);
                 if (item.id === 'vehicles') setVehicleSubView('list');
               }}
