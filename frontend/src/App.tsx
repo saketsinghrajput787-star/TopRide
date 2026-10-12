@@ -36,7 +36,15 @@ import { HelpView } from './views/HelpView';
 
 export function App() {
   // Navigation & Screen Stack
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>('welcome');
+  const getInitialScreen = (): ScreenId => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const s = urlParams.get('screen') as ScreenId | null;
+      if (s) return s;
+    }
+    return 'welcome';
+  };
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>(getInitialScreen);
   const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
   const [history, setHistory] = useState<ScreenId[]>([]);
 
@@ -96,7 +104,13 @@ export function App() {
             const profile = await api.getProfile();
             if (profile && profile.id) {
               setUser(profile);
-              setCurrentScreen('home');
+              const urlParams = new URLSearchParams(window.location.search);
+              const requestedScreen = urlParams.get('screen') as ScreenId | null;
+              if (requestedScreen && authScreens.includes(requestedScreen)) {
+                setCurrentScreen(requestedScreen);
+              } else {
+                setCurrentScreen('home');
+              }
               const [v, c, n] = await Promise.allSettled([
                 api.listVehicles(),
                 api.listConversations(),
@@ -165,7 +179,7 @@ export function App() {
       .subscribe();
 
     // Supabase Auth listener for INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT
-    const authScreens = ['welcome', 'onboard', 'login', 'signup', 'verify-code', 'age-verify', 'profile-photo', 'profile-bio', 'profile-complete'];
+    const authScreens = ['welcome', 'splash', 'onboard', 'login', 'signup', 'verify-code', 'age-verify', 'profile-photo', 'profile-bio', 'profile-complete'];
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[TopRide Auth Trace @ onAuthStateChange] event:', event, {
         sessionExists: !!session,
@@ -215,14 +229,22 @@ export function App() {
   // Browser History synchronization (popstate listener for browser Back/Forward navigation)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.history.replaceState({ screen: currentScreen }, '');
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlScreen = urlParams.get('screen') as ScreenId | null;
+      if (urlScreen) {
+        window.history.replaceState({ screen: urlScreen }, '', window.location.href);
+      } else {
+        window.history.replaceState({ screen: currentScreen }, '', currentScreen === 'home' ? '/' : `/?screen=${currentScreen}`);
+      }
 
       const handlePopState = (event: PopStateEvent) => {
         if (event.state && event.state.screen) {
           setCurrentScreen(event.state.screen);
           setHistory((prev) => prev.slice(0, -1));
         } else {
-          setCurrentScreen('home');
+          const currentParams = new URLSearchParams(window.location.search);
+          const popScreen = currentParams.get('screen') as ScreenId | null;
+          setCurrentScreen(popScreen || 'welcome');
         }
       };
 
@@ -235,7 +257,8 @@ export function App() {
   const navigateScreen = (screen: ScreenId) => {
     if (screen !== currentScreen) {
       if (typeof window !== 'undefined') {
-        window.history.pushState({ screen }, '');
+        const newUrl = screen === 'home' ? '/' : `/?screen=${screen}`;
+        window.history.pushState({ screen }, '', newUrl);
       }
       setHistory((prev) => [...prev, currentScreen]);
       setCurrentScreen(screen);
@@ -631,6 +654,7 @@ export function App() {
 
   const isAuthScreen = [
     'welcome',
+    'splash',
     'onboard',
     'login',
     'signup',

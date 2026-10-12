@@ -257,9 +257,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (confirm('Are you sure you want to log out of TopRide?')) {
-                  onLogout();
-                }
+                onLogout();
               }}
               className="w-full flex items-center gap-3 p-3.5 rounded-2xl text-left text-rose-600 hover:bg-rose-50 font-bold transition-colors cursor-pointer"
             >

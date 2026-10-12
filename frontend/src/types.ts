@@ -2,6 +2,7 @@ export type NavigationTab = 'home' | 'find' | 'trips' | 'inbox' | 'account';
 
 export type ScreenId = 
   | 'welcome'
+  | 'splash'
   | 'onboard'
   | 'login'
   | 'signup'

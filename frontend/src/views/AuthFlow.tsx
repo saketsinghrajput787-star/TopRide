@@ -23,6 +23,7 @@ import {
 import { api, supabase } from '../api';
 
 import roadTripFriendsImg from '../assets/road_trip_friends.jpg';
+import onboardingCarImg from '../assets/onboarding_car.png';
 
 interface AuthFlowProps {
   currentScreen: ScreenId;
@@ -37,8 +38,8 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
   onCompleteAuth,
   showToast,
 }) => {
-  // Onboarding Carousel Sub-step (0: Welcome, 1: 3 Things intro, 2: Rule 1, 3: Rule 2, 4: Rule 3, 5: Got it? Great!)
-  const [onboardRuleStep, setOnboardRuleStep] = useState<number>(0);
+  // Onboarding Carousel Sub-step (1: 3 Things intro, 2: Rule 1, 3: Rule 2, 4: Rule 3, 5: Got it? Great!)
+  const [onboardRuleStep, setOnboardRuleStep] = useState<number>(1);
 
   // Authentication Credentials (EMPTY defaults — NO hardcoded demo credentials in production)
   const [email, setEmail] = useState<string>('');
@@ -167,169 +168,21 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
     }
   };
 
-  // ================= 1. SPLASH SCREEN (FIGMA ONBOARDING-1) =================
+  // ================= 1. WELCOME & SOCIAL AUTH SCREEN (FIGMA FRAME WELCOME) =================
   if (currentScreen === 'welcome') {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-0 sm:p-4 select-none">
-        {/* Mobile Device Canvas (Exact 390x844 Figma Frame proportions) */}
-        <div className="w-full max-w-[390px] min-h-screen sm:min-h-[844px] bg-white sm:rounded-[44px] sm:shadow-2xl sm:border sm:border-slate-200/80 flex flex-col justify-between py-6 px-6 overflow-hidden relative">
-          {/* Top Status Bar & Compass Logo */}
-          <div className="space-y-4 pt-2">
-            {/* Status bar notch/time simulation for mobile preview */}
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-800 px-2 opacity-80">
-              <span>9:41</span>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3.5 h-2 border border-slate-700 rounded-xs inline-block relative after:content-[''] after:w-1 after:h-1.5 after:bg-slate-700 after:absolute after:-right-1 after:top-0.5"></span>
-              </div>
-            </div>
-
-            {/* Signature Figma Orange Compass "TOP" Logo */}
-            <div className="flex justify-center pt-2 pb-1">
-              <div className="flex flex-col items-center">
-                {/* 8-point geometric compass star */}
-                <svg
-                  width="44"
-                  height="44"
-                  viewBox="0 0 44 44"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="shrink-0"
-                >
-                  <circle cx="22" cy="22" r="19.5" stroke="#F05A28" strokeWidth="2.5" />
-                  <polygon points="22,5 24.5,22 22,22 19.5,22" fill="#F05A28" />
-                  <polygon points="22,39 24.5,22 22,22 19.5,22" fill="#F05A28" opacity="0.9" />
-                  <polygon points="39,22 22,24.5 22,22 22,19.5" fill="#F05A28" />
-                  <polygon points="5,22 22,24.5 22,22 22,19.5" fill="#F05A28" opacity="0.9" />
-                  <polygon points="33,11 23,21 21,23" fill="#F05A28" opacity="0.65" />
-                  <polygon points="33,33 23,23 21,21" fill="#F05A28" opacity="0.65" />
-                  <polygon points="11,33 21,23 23,21" fill="#F05A28" opacity="0.65" />
-                  <polygon points="11,11 21,21 23,23" fill="#F05A28" opacity="0.65" />
-                  <circle cx="22" cy="22" r="2.5" fill="#FFFFFF" />
-                  <circle cx="22" cy="22" r="1.5" fill="#F05A28" />
-                </svg>
-                <span className="font-black tracking-widest text-[#F05A28] text-xs mt-1.5 uppercase">
-                  TOP
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Center Light-Blue Rounded Illustration Panel (Figma Frame onboarding-1) */}
-          <div className="my-auto bg-[#7EC6EC] rounded-[32px] p-6 sm:p-7 min-h-[420px] flex flex-col justify-between relative overflow-hidden shadow-xs border border-[#6BBCE5]/40">
-            {/* Left-aligned exact headline with line breaks */}
-            <h1 className="text-[27px] sm:text-[28px] font-black leading-[1.16] text-[#1A1D20] tracking-tight relative z-10 text-left pt-1">
-              Carpool<br />
-              Adventures:<br />
-              Sharing, Laughing,<br />
-              Navigating
-            </h1>
-
-            {/* Figma exact front-view sports car line-art centered at bottom */}
-            <div className="w-full max-w-[310px] mx-auto -mb-1 mt-auto pointer-events-none select-none">
-              <svg
-                viewBox="0 0 240 160"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="w-full h-auto drop-shadow-xs"
-              >
-                {/* Windshield & Roof Frame */}
-                <path
-                  d="M50 48 C75 22, 165 22, 190 48 L210 70 L30 70 Z"
-                  fill="#FFFFFF"
-                  stroke="#1A1D20"
-                  strokeWidth="2.5"
-                  strokeLinejoin="round"
-                />
-                {/* Windshield reflection lines */}
-                <path d="M70 36 L62 65" stroke="#7EC6EC" strokeWidth="2.2" strokeLinecap="round" />
-                <path d="M80 34 L72 65" stroke="#7EC6EC" strokeWidth="1.6" strokeLinecap="round" />
-                {/* Rearview Mirror */}
-                <rect x="115" y="32" width="10" height="5" rx="2" fill="#1A1D20" />
-                <line x1="120" y1="28" x2="120" y2="32" stroke="#1A1D20" strokeWidth="2" />
-
-                {/* Side Mirrors */}
-                <path d="M26 62 C20 62, 16 66, 18 72 C20 76, 26 76, 29 72 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
-                <path d="M214 62 C220 62, 224 66, 222 72 C220 76, 214 76, 211 72 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
-
-                {/* Car Hood & Fenders */}
-                <path
-                  d="M20 75 C18 85, 20 95, 24 105 C28 112, 38 116, 50 116 L190 116 C202 116, 212 112, 216 105 C220 95, 222 85, 220 75 C215 72, 195 70, 185 70 C165 72, 75 72, 55 70 C45 70, 25 72, 20 75 Z"
-                  fill="#FFFFFF"
-                  stroke="#1A1D20"
-                  strokeWidth="2.5"
-                  strokeLinejoin="round"
-                />
-
-                {/* Hood Lines */}
-                <path d="M72 70 C74 85, 78 98, 82 105" stroke="#1A1D20" strokeWidth="2" strokeLinecap="round" />
-                <path d="M168 70 C166 85, 162 98, 158 105" stroke="#1A1D20" strokeWidth="2" strokeLinecap="round" />
-
-                {/* Oval Porsche-Style Headlights */}
-                <ellipse cx="46" cy="88" rx="14" ry="10" transform="rotate(-12 46 88)" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
-                <circle cx="46" cy="88" r="5" fill="#7EC6EC" stroke="#1A1D20" strokeWidth="1.5" />
-                <circle cx="45" cy="86" r="1.5" fill="#FFFFFF" />
-
-                <ellipse cx="194" cy="88" rx="14" ry="10" transform="rotate(12 194 88)" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
-                <circle cx="194" cy="88" r="5" fill="#7EC6EC" stroke="#1A1D20" strokeWidth="1.5" />
-                <circle cx="193" cy="86" r="1.5" fill="#FFFFFF" />
-
-                {/* Front Bumper & Lower Grille */}
-                <path d="M30 116 L30 135 C30 144, 45 146, 60 146 L180 146 C195 146, 210 144, 210 135 L210 116" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
-                
-                {/* Horizontal Slats */}
-                <rect x="75" y="124" width="90" height="16" rx="4" fill="#1A1D20" />
-                <line x1="85" y1="128" x2="155" y2="128" stroke="#FFFFFF" strokeWidth="1" opacity="0.6" />
-                <line x1="85" y1="134" x2="155" y2="134" stroke="#FFFFFF" strokeWidth="1" opacity="0.6" />
-
-                {/* Side Scoops */}
-                <path d="M38 123 C42 123, 46 126, 46 132 C46 138, 42 140, 38 140 Z" fill="#1A1D20" />
-                <path d="M202 123 C198 123, 194 126, 194 132 C194 138, 198 140, 202 140 Z" fill="#1A1D20" />
-
-                {/* Tires */}
-                <rect x="22" y="132" width="12" height="18" rx="4" fill="#1A1D20" />
-                <rect x="206" y="132" width="12" height="18" rx="4" fill="#1A1D20" />
-
-                {/* Ground Baseline */}
-                <line x1="16" y1="152" x2="224" y2="152" stroke="#1A1D20" strokeWidth="2.5" strokeLinecap="round" />
-              </svg>
-            </div>
-          </div>
-
-          {/* Bottom Compact Dark Button & Version Label */}
-          <div className="pt-5 pb-1 flex flex-col items-center">
-            <button
-              onClick={() => {
-                setOnboardRuleStep(0);
-                onNavigateScreen('onboard');
-              }}
-              className="w-40 py-3.5 rounded-full bg-[#1A1D20] hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-md active:scale-95 cursor-pointer text-center"
-            >
-              Let's go
-            </button>
-
-            <span className="text-[11px] font-medium text-slate-400 text-center block mt-3 select-none">
-              Version 4.5.0 (4821)
-            </span>
-
-            {/* Mobile Home Indicator */}
-            <div className="w-32 h-1 bg-slate-900/80 rounded-full mx-auto mt-4"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ================= 2. WELCOME & SOCIAL AUTH SCREEN (FIGMA FRAME WELCOME) =================
-  if (currentScreen === 'onboard' && onboardRuleStep === 0) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-0 sm:p-4 select-none">
         <div className="w-full max-w-[390px] min-h-screen sm:min-h-[844px] bg-white sm:rounded-[44px] sm:shadow-2xl sm:border sm:border-slate-200/80 flex flex-col justify-between py-6 px-6 overflow-hidden relative">
           {/* Top Header with Back Chevron */}
           <div className="flex items-center justify-between pt-1">
             <button
-              onClick={() => onNavigateScreen('welcome')}
+              onClick={() => {
+                if (typeof window !== 'undefined' && window.history.length > 1) {
+                  window.history.back();
+                }
+              }}
               className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-800 transition-colors cursor-pointer"
-              aria-label="Back to splash"
+              aria-label="Back"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -445,12 +298,109 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
           {/* Explore Community Rules & Home Indicator */}
           <div className="pt-2 pb-1 text-center space-y-3">
             <button
-              onClick={() => setOnboardRuleStep(1)}
+              onClick={() => onNavigateScreen('splash')}
               className="text-xs font-semibold text-[#F05A28] hover:underline cursor-pointer"
             >
-              New to TopRide? 3 things to know before getting started ›
+              New to TopRide? Explore carpool adventures ›
             </button>
             <div className="w-32 h-1 bg-slate-900/80 rounded-full mx-auto"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= 2. SPLASH SCREEN (FIGMA ONBOARDING-1) =================
+  if (currentScreen === 'splash' || (currentScreen === 'onboard' && onboardRuleStep === 0)) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-0 sm:p-4 select-none">
+        {/* Mobile Device Canvas (Exact 390x844 Figma Frame proportions) */}
+        <div className="w-full max-w-[390px] min-h-screen sm:min-h-[844px] bg-white sm:rounded-[44px] sm:shadow-2xl sm:border sm:border-slate-200/80 flex flex-col justify-between py-6 px-6 overflow-hidden relative">
+          {/* Top Status Bar & Navigation */}
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-800 px-1 opacity-80">
+              <button
+                onClick={() => onNavigateScreen('welcome')}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-700 transition-colors cursor-pointer"
+                aria-label="Back to Welcome"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <span className="font-bold -ml-4">9:41</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3.5 h-2 border border-slate-700 rounded-xs inline-block relative after:content-[''] after:w-1 after:h-1.5 after:bg-slate-700 after:absolute after:-right-1 after:top-0.5"></span>
+              </div>
+            </div>
+
+            {/* Signature Figma Orange Compass "TOP" Logo */}
+            <div className="flex justify-center pt-1 pb-1">
+              <div className="flex flex-col items-center">
+                {/* 8-point geometric compass star */}
+                <svg
+                  width="44"
+                  height="44"
+                  viewBox="0 0 44 44"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="shrink-0"
+                >
+                  <circle cx="22" cy="22" r="19.5" stroke="#F05A28" strokeWidth="2.5" />
+                  <polygon points="22,5 24.5,22 22,22 19.5,22" fill="#F05A28" />
+                  <polygon points="22,39 24.5,22 22,22 19.5,22" fill="#F05A28" opacity="0.9" />
+                  <polygon points="39,22 22,24.5 22,22 22,19.5" fill="#F05A28" />
+                  <polygon points="5,22 22,24.5 22,22 22,19.5" fill="#F05A28" opacity="0.9" />
+                  <polygon points="33,11 23,21 21,23" fill="#F05A28" opacity="0.65" />
+                  <polygon points="33,33 23,23 21,21" fill="#F05A28" opacity="0.65" />
+                  <polygon points="11,33 21,23 23,21" fill="#F05A28" opacity="0.65" />
+                  <polygon points="11,11 21,21 23,23" fill="#F05A28" opacity="0.65" />
+                  <circle cx="22" cy="22" r="2.5" fill="#FFFFFF" />
+                  <circle cx="22" cy="22" r="1.5" fill="#F05A28" />
+                </svg>
+                <span className="font-black tracking-widest text-[#F05A28] text-xs mt-1.5 uppercase">
+                  TOP
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Center Light-Blue Rounded Illustration Panel (Figma Frame onboarding-1) */}
+          <div className="my-auto bg-[#8ECBF5] rounded-[32px] p-6 sm:p-7 min-h-[420px] flex flex-col justify-between relative overflow-hidden shadow-xs border border-[#7EC6EC]/40">
+            {/* Left-aligned exact headline with line breaks */}
+            <h1 className="text-[27px] sm:text-[28px] font-black leading-[1.16] text-[#1A1D20] tracking-tight relative z-10 text-left pt-1">
+              Carpool<br />
+              Adventures:<br />
+              Sharing, Laughing,<br />
+              Navigating
+            </h1>
+
+            {/* Original Figma car illustration cropped on right edge */}
+            <div className="w-full flex justify-end -mr-6 -mb-6 mt-auto pointer-events-none select-none overflow-hidden">
+              <img
+                src={onboardingCarImg}
+                alt="Carpool Car illustration"
+                className="w-[220px] sm:w-[230px] h-auto object-contain"
+              />
+            </div>
+          </div>
+
+          {/* Bottom Compact Dark Button & Version Label */}
+          <div className="pt-5 pb-1 flex flex-col items-center">
+            <button
+              onClick={() => {
+                setOnboardRuleStep(1);
+                onNavigateScreen('onboard');
+              }}
+              className="w-40 py-3.5 rounded-full bg-[#1A1D20] hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-md active:scale-95 cursor-pointer text-center"
+            >
+              Let's go
+            </button>
+
+            <span className="text-[11px] font-medium text-slate-400 text-center block mt-3 select-none">
+              Version 4.5.0 (4821)
+            </span>
+
+            {/* Mobile Home Indicator */}
+            <div className="w-32 h-1 bg-slate-900/80 rounded-full mx-auto mt-4"></div>
           </div>
         </div>
       </div>
@@ -596,7 +546,13 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
           {/* Header */}
           <div className="flex items-center justify-between">
             <button
-              onClick={() => setOnboardRuleStep(onboardRuleStep - 1)}
+              onClick={() => {
+                if (onboardRuleStep === 1) {
+                  onNavigateScreen('splash');
+                } else {
+                  setOnboardRuleStep(onboardRuleStep - 1);
+                }
+              }}
               className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 hover:bg-slate-200 cursor-pointer"
               aria-label="Back"
             >
