@@ -194,10 +194,11 @@ export function App() {
           if (profile && profile.id) {
             setUser(profile);
             setCurrentScreen((prev) => (authScreens.includes(prev) ? 'home' : prev));
-            const [userConvs, userVehs, userNotifs] = await Promise.allSettled([
+            const [userConvs, userVehs, userNotifs, userTrips] = await Promise.allSettled([
               api.listConversations(),
               api.listVehicles(),
-              api.listNotifications()
+              api.listNotifications(),
+              api.listTrips()
             ]);
             if (userConvs.status === 'fulfilled' && userConvs.value) {
               setConversations(userConvs.value);
@@ -205,6 +206,7 @@ export function App() {
             }
             if (userVehs.status === 'fulfilled' && userVehs.value) setVehicles(userVehs.value);
             if (userNotifs.status === 'fulfilled' && userNotifs.value) setNotifications(userNotifs.value);
+            if (userTrips.status === 'fulfilled' && userTrips.value) setTrips(userTrips.value);
           }
         } catch (e) {
           console.warn('Auth state change error:', e);
@@ -821,6 +823,7 @@ export function App() {
           <TripsView
             trips={trips}
             luggagePackages={luggagePackages}
+            currentUser={user}
             onSelectTrip={handleSelectTrip}
             onCancelTrip={handleCancelTrip}
             onNavigateScreen={navigateScreen}

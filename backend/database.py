@@ -14,7 +14,7 @@ from backend.config import (
 )
 from backend.schemas import (
     UserProfile, UserProfileUpdate, VehicleSchema, VehicleCreate, TripSchema, TripCreate,
-    BookingCreate, BookingResponse, PassengerRequestSchema, PassengerRequestCreate,
+    PassengerBookingItemSchema, BookingCreate, BookingResponse, PassengerRequestSchema, PassengerRequestCreate,
     LuggagePackageSchema, LuggagePackageCreate, ConversationSchema, MessageSchema,
     NotificationItemSchema, UniversityOptionSchema, StudentVerifyRequest,
     IdVerificationRequest, SupportTicketCreate,
@@ -1038,24 +1038,61 @@ def trip_row_to_schema(
             except Exception:
                 pass
 
-    # Dynamic roles
+    # Dynamic roles & booking data
     is_driver = bool(user_id and driver_id == user_id)
     is_passenger = False
-    if user_id and not is_driver:
-        try:
-            b_res = (
-                c.table("bookings")
-                .select("id")
-                .eq("trip_id", row["id"])
-                .eq("passenger_id", user_id)
-                .eq("booking_status", "confirmed")
-                .limit(1)
-                .execute()
-            )
-            if b_res.data and len(b_res.data) > 0:
-                is_passenger = True
-        except Exception:
-            pass
+    booked_seat_count = 0
+    total_paid = 0.0
+    booking_id = None
+    booking_ref = None
+    booking_status = None
+    passenger_bookings: List[PassengerBookingItemSchema] = []
+
+    if user_id:
+        if is_driver:
+            try:
+                b_list_res = c.table("bookings").select("*").eq("trip_id", row["id"]).order("created_at", desc=True).execute()
+                for b in (b_list_res.data or []):
+                    p_prof = fetch_profile_from_db(str(b["passenger_id"]), client=c)
+                    passenger_bookings.append(
+                        PassengerBookingItemSchema(
+                            id=str(b["id"]),
+                            bookingRef=b.get("booking_ref") or "",
+                            passengerId=str(b["passenger_id"]),
+                            passengerName=p_prof.name if p_prof else "Passenger",
+                            passengerInitials=p_prof.initials if p_prof else "PA",
+                            seatsCount=int(b.get("seats_count") or 1),
+                            totalPaid=float(b.get("total_paid") or 0.0),
+                            bookingStatus=b.get("booking_status") or "confirmed",
+                            paymentStatus=b.get("payment_status") or "completed",
+                            luggageTier=b.get("luggage_tier") or "small",
+                            passengerNotes=b.get("passenger_notes") or "",
+                            createdAt=b.get("created_at") or ""
+                        )
+                    )
+            except Exception:
+                pass
+        else:
+            try:
+                b_res = (
+                    c.table("bookings")
+                    .select("*")
+                    .eq("trip_id", row["id"])
+                    .eq("passenger_id", user_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if b_res.data and len(b_res.data) > 0:
+                    is_passenger = True
+                    b_match = b_res.data[0]
+                    booked_seat_count = int(b_match.get("seats_count") or 1)
+                    total_paid = float(b_match.get("total_paid") or 0.0)
+                    booking_id = str(b_match["id"])
+                    booking_ref = b_match.get("booking_ref") or ""
+                    booking_status = b_match.get("booking_status") or "confirmed"
+            except Exception:
+                pass
 
     total_seats = int(row.get("total_seats") or 3)
     available_seats = int(row.get("available_seats") if row.get("available_seats") is not None else total_seats)
@@ -1099,6 +1136,12 @@ def trip_row_to_schema(
         isDriverTrip=is_driver,
         isPassengerTrip=is_passenger,
         status=row.get("status") or "upcoming",
+        bookedSeatCount=booked_seat_count,
+        totalPaid=total_paid,
+        bookingId=booking_id,
+        bookingRef=booking_ref,
+        bookingStatus=booking_status,
+        passengerBookings=passenger_bookings,
         originLatitude=float(row["origin_latitude"]) if row.get("origin_latitude") is not None else None,
         originLongitude=float(row["origin_longitude"]) if row.get("origin_longitude") is not None else None,
         originPlaceId=row.get("origin_place_id"),
@@ -1629,6 +1672,112 @@ def cancel_trip_in_db(
     except Exception as e:
         print(f"[Supabase] cancel_trip_in_db error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel trip: {str(e)}")
+
+def fetch_my_trips_from_db(
+    user_id: str,
+    client: Optional[Client] = None
+) -> List[TripSchema]:
+    """Fetch all trips created/owned by the authenticated driver, enriched with vehicle and passenger bookings."""
+    c = client or supabase_client
+    try:
+        res = (
+            c.table("trips")
+            .select("*")
+            .eq("driver_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        trips_list: List[TripSchema] = []
+        for row in (res.data or []):
+            schema = trip_row_to_schema(row, user_id=user_id, client=c)
+            trips_list.append(schema)
+        return trips_list
+    except Exception as e:
+        print(f"[Supabase] fetch_my_trips_from_db error: {e}")
+        return []
+
+def complete_trip_in_db(
+    trip_id: str,
+    driver_id: str,
+    client: Optional[Client] = None
+) -> bool:
+    """Mark a trip as completed if authenticated user is the driver, updating confirmed bookings and driver stats."""
+    c = client or supabase_client
+    try:
+        t_res = c.table("trips").select("id, driver_id, origin, destination, date, status").eq("id", trip_id).execute()
+        if not t_res.data or len(t_res.data) == 0:
+            raise HTTPException(status_code=404, detail="Trip not found.")
+        trip_row = t_res.data[0]
+        if str(trip_row["driver_id"]) != driver_id:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only the driver who created this trip can complete it.")
+        if trip_row.get("status") == "cancelled":
+            raise HTTPException(status_code=400, detail="Cannot complete a cancelled trip.")
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        c.table("trips").update({
+            "status": "completed",
+            "updated_at": now_iso
+        }).eq("id", trip_id).execute()
+
+        # Update confirmed bookings on this trip to completed
+        try:
+            c.table("bookings").update({
+                "booking_status": "completed",
+                "updated_at": now_iso
+            }).eq("trip_id", trip_id).eq("booking_status", "confirmed").execute()
+        except Exception as b_err:
+            print(f"[Supabase] booking complete update notice: {b_err}")
+
+        # Increment completed trips count on driver profile
+        try:
+            prof = fetch_profile_from_db(driver_id, client=c)
+            if prof:
+                prof.tripsCount = (prof.tripsCount or 0) + 1
+                upsert_profile_in_db(prof, client=c)
+        except Exception:
+            pass
+
+        # Notify passengers of trip completion
+        try:
+            b_res = c.table("bookings").select("passenger_id").eq("trip_id", trip_id).execute()
+            for b_row in (b_res.data or []):
+                pass_id = str(b_row["passenger_id"])
+                notif_id = str(uuid.uuid4())
+                notif_obj = NotificationItemSchema(
+                    id=notif_id,
+                    userId=pass_id,
+                    title="Trip Completed",
+                    description=f"Your trip {trip_row.get('origin', '')} → {trip_row.get('destination', '')} has been completed. Thank you for riding with TopRide!",
+                    time=now_iso,
+                    read=False,
+                    type="trip",
+                    targetScreen="trips",
+                    targetId=trip_id
+                )
+                db.notifications.insert(0, notif_obj)
+                try:
+                    c.table("notifications").insert({
+                        "id": notif_id,
+                        "user_id": pass_id,
+                        "title": notif_obj.title,
+                        "description": notif_obj.description,
+                        "read": False,
+                        "type": "trip",
+                        "target_screen": "trips",
+                        "target_id": trip_id,
+                        "created_at": now_iso
+                    }).execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return True
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Supabase] complete_trip_in_db error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete trip: {str(e)}")
 
 # ============================================================
 # PHASE 2B / 3B: BOOKINGS & RAZORPAY TEST ORDER CREATION

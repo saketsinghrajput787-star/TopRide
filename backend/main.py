@@ -23,7 +23,7 @@ from backend.database import (
     db, booking_lock, supabase_client, get_user_supabase_client,
     fetch_profile_from_db, upsert_profile_in_db, fetch_conversations_from_db,
     get_or_create_conversation_in_db, insert_message_in_db, mark_conversation_read_in_db,
-    insert_trip_in_db, fetch_trips_from_db, fetch_trip_by_id_from_db, cancel_trip_in_db,
+    insert_trip_in_db, fetch_trips_from_db, fetch_my_trips_from_db, fetch_trip_by_id_from_db, cancel_trip_in_db, complete_trip_in_db,
     create_booking_in_db, fetch_bookings_from_db, fetch_booking_by_id_from_db, cancel_booking_in_db,
     create_razorpay_order_in_db, update_payment_status_in_db,
     verify_payment_and_book_in_db, process_razorpay_webhook_event,
@@ -358,6 +358,15 @@ def search_trips(
         client=scoped_client
     )
 
+@app.get("/api/trips/my", response_model=List[TripSchema])
+def list_my_trips(
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization else None
+    scoped_client = get_user_supabase_client(token)
+    return fetch_my_trips_from_db(user_id=user_id, client=scoped_client)
+
 @app.get("/api/trips/{trip_id}", response_model=TripSchema)
 def get_trip(
     trip_id: str,
@@ -392,6 +401,17 @@ def cancel_trip(
     scoped_client = get_user_supabase_client(token)
     success = cancel_trip_in_db(trip_id=trip_id, driver_id=user_id, reason=reason, client=scoped_client)
     return {"success": success, "message": "Trip cancelled successfully"}
+
+@app.post("/api/trips/{trip_id}/complete")
+def complete_trip(
+    trip_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
+    authorization: Optional[str] = Header(None)
+):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization and authorization.startswith("Bearer ") else None
+    scoped_client = get_user_supabase_client(token)
+    success = complete_trip_in_db(trip_id=trip_id, driver_id=user_id, client=scoped_client)
+    return {"success": success, "message": "Trip completed successfully"}
 
 # ================= 6. BOOKINGS =================
 @app.post("/api/bookings", response_model=BookingResponse)

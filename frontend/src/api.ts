@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { 
-  User, Vehicle, Trip, PassengerRequest, LuggagePackage, 
+  User, Vehicle, Trip, Booking, PassengerRequest, LuggagePackage, 
   Conversation, Message, NotificationItem, UniversityOption, PaymentOrderResponse, PaymentVerifyResponse,
   MatchingResponse, AssignmentRequest, AssignmentResponse,
   PriceBreakdown, PriceEstimateRequest
@@ -175,6 +175,16 @@ export const api = {
     });
   },
 
+  async listMyTrips(): Promise<Trip[]> {
+    return request<Trip[]>('/api/trips/my');
+  },
+
+  async completeTrip(tripId: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>(`/api/trips/${tripId}/complete`, {
+      method: 'POST',
+    });
+  },
+
   async cancelTrip(tripId: string, reason: string): Promise<any> {
     return request(`/api/trips/${tripId}/cancel?reason=${encodeURIComponent(reason)}`, {
       method: 'POST',
@@ -238,12 +248,12 @@ export const api = {
     });
   },
 
-  async listBookings(asDriver: boolean = false): Promise<any[]> {
-    return request<any[]>(`/api/bookings?as_driver=${asDriver}`);
+  async listBookings(asDriver: boolean = false): Promise<Booking[]> {
+    return request<Booking[]>(`/api/bookings?as_driver=${asDriver}`);
   },
 
-  async getBooking(bookingId: string): Promise<any> {
-    return request<any>(`/api/bookings/${bookingId}`);
+  async getBooking(bookingId: string): Promise<Booking> {
+    return request<Booking>(`/api/bookings/${bookingId}`);
   },
 
   async cancelBooking(bookingId: string, reason: string = 'User cancelled'): Promise<any> {

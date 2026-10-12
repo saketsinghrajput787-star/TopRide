@@ -71,6 +71,20 @@ class VehicleCreate(BaseModel):
     photoUrl: Optional[str] = None
 
 # ================= TRIP SCHEMAS =================
+class PassengerBookingItemSchema(BaseModel):
+    id: str
+    bookingRef: str = ""
+    passengerId: str
+    passengerName: str = "Passenger"
+    passengerInitials: str = "PA"
+    seatsCount: int = 1
+    totalPaid: float = 0.0
+    bookingStatus: str = "confirmed"
+    paymentStatus: str = "completed"
+    luggageTier: str = "small"
+    passengerNotes: Optional[str] = ""
+    createdAt: Optional[str] = ""
+
 class TripSchema(BaseModel):
     id: str
     driverId: str
@@ -103,6 +117,10 @@ class TripSchema(BaseModel):
     status: Literal["upcoming", "in-progress", "completed", "cancelled"] = "upcoming"
     bookedSeatCount: Optional[int] = 0
     totalPaid: Optional[float] = 0.0
+    bookingId: Optional[str] = None
+    bookingRef: Optional[str] = None
+    bookingStatus: Optional[str] = None
+    passengerBookings: Optional[List[PassengerBookingItemSchema]] = []
     originLatitude: Optional[float] = None
     originLongitude: Optional[float] = None
     originPlaceId: Optional[str] = None

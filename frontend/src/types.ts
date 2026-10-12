@@ -86,6 +86,21 @@ export interface LocationData {
   placeId?: string;
 }
 
+export interface PassengerBookingItem {
+  id: string;
+  bookingRef: string;
+  passengerId: string;
+  passengerName: string;
+  passengerInitials: string;
+  seatsCount: number;
+  totalPaid: number;
+  bookingStatus: string;
+  paymentStatus: string;
+  luggageTier: string;
+  passengerNotes?: string;
+  createdAt?: string;
+}
+
 export interface Trip {
   id: string;
   driverId: string;
@@ -118,6 +133,10 @@ export interface Trip {
   status: 'upcoming' | 'in-progress' | 'completed' | 'cancelled';
   bookedSeatCount?: number;
   totalPaid?: number;
+  bookingId?: string;
+  bookingRef?: string;
+  bookingStatus?: string;
+  passengerBookings?: PassengerBookingItem[];
   originLatitude?: number;
   originLongitude?: number;
   originPlaceId?: string;
@@ -239,6 +258,24 @@ export interface PaymentOrderResponse {
   tripId: string;
   seatsCount: number;
   receipt: string;
+}
+
+export interface Booking {
+  id: string;
+  bookingRef: string;
+  tripId: string;
+  passengerId: string;
+  passengerName?: string;
+  passengerInitials?: string;
+  seatsCount: number;
+  luggageTier?: string;
+  passengerNotes?: string;
+  totalPaid: number;
+  paymentStatus?: string;
+  bookingStatus: 'confirmed' | 'completed' | 'cancelled';
+  status: 'confirmed' | 'completed' | 'cancelled';
+  createdAt?: string;
+  trip?: Trip;
 }
 
 export interface PaymentVerifyResponse {
