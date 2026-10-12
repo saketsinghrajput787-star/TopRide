@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { api, supabase } from '../api';
 
+import roadTripFriendsImg from '../assets/road_trip_friends.jpg';
+
 interface AuthFlowProps {
   currentScreen: ScreenId;
   onNavigateScreen: (screen: ScreenId) => void;
@@ -68,7 +70,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
 
   // Loading States
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | null>(null);
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<'google' | 'apple' | 'facebook' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Months reference for DOB calculation
@@ -119,6 +121,29 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
     }
   };
 
+  // Facebook OAuth Handler
+  const handleFacebookSignIn = async () => {
+    try {
+      setOauthLoadingProvider('facebook');
+      setErrorMessage(null);
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'facebook',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) {
+        setErrorMessage('Facebook Sign-In is not configured on this project. Please sign in with Google or Email.');
+        showToast('Facebook Sign-In is not configured on this project');
+      }
+    } catch (err: any) {
+      setErrorMessage('Facebook Sign-In is currently unavailable. Please continue with Google or Email.');
+      showToast('Facebook Sign-In is currently unavailable.');
+    } finally {
+      setOauthLoadingProvider(null);
+    }
+  };
+
   // Apple OAuth Handler
   const handleAppleSignIn = async () => {
     try {
@@ -132,11 +157,11 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
       });
       if (error) {
         showToast(error.message || 'Apple OAuth is not configured on this project');
-        setErrorMessage(error.message);
+        setErrorMessage('Apple Sign-In is not configured on this project. Please sign in with Google or Email.');
       }
     } catch (err: any) {
-      showToast(err.message || 'Apple Sign-In is not enabled on this project.');
-      setErrorMessage(err.message);
+      showToast('Apple Sign-In is not enabled on this project.');
+      setErrorMessage('Apple Sign-In is not enabled on this project.');
     } finally {
       setOauthLoadingProvider(null);
     }
@@ -190,17 +215,17 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
           </div>
 
           {/* Center Light-Blue Rounded Illustration Panel (Figma Frame onboarding-1) */}
-          <div className="my-auto bg-[#7EC6EC] rounded-[30px] p-7 min-h-[410px] flex flex-col justify-between relative overflow-hidden shadow-xs border border-[#6BBCE5]/40">
+          <div className="my-auto bg-[#7EC6EC] rounded-[32px] p-6 sm:p-7 min-h-[420px] flex flex-col justify-between relative overflow-hidden shadow-xs border border-[#6BBCE5]/40">
             {/* Left-aligned exact headline with line breaks */}
-            <h1 className="text-[26px] sm:text-[27px] font-black leading-[1.18] text-[#1A1D20] tracking-tight relative z-10 text-left">
+            <h1 className="text-[27px] sm:text-[28px] font-black leading-[1.16] text-[#1A1D20] tracking-tight relative z-10 text-left pt-1">
               Carpool<br />
               Adventures:<br />
               Sharing, Laughing,<br />
               Navigating
             </h1>
 
-            {/* Figma exact front-view sports car line-art cropped at bottom right */}
-            <div className="absolute -bottom-1 -right-2 w-64 pointer-events-none select-none">
+            {/* Figma exact front-view sports car line-art centered at bottom */}
+            <div className="w-full max-w-[310px] mx-auto -mb-1 mt-auto pointer-events-none select-none">
               <svg
                 viewBox="0 0 240 160"
                 fill="none"
@@ -216,8 +241,8 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
                   strokeLinejoin="round"
                 />
                 {/* Windshield reflection lines */}
-                <path d="M70 36 L62 65" stroke="#7EC6EC" strokeWidth="2" strokeLinecap="round" />
-                <path d="M80 34 L72 65" stroke="#7EC6EC" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M70 36 L62 65" stroke="#7EC6EC" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M80 34 L72 65" stroke="#7EC6EC" strokeWidth="1.6" strokeLinecap="round" />
                 {/* Rearview Mirror */}
                 <rect x="115" y="32" width="10" height="5" rx="2" fill="#1A1D20" />
                 <line x1="120" y1="28" x2="120" y2="32" stroke="#1A1D20" strokeWidth="2" />
@@ -277,7 +302,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
                 setOnboardRuleStep(0);
                 onNavigateScreen('onboard');
               }}
-              className="w-36 py-3 rounded-full bg-[#1A1D20] hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-md active:scale-95 cursor-pointer text-center"
+              className="w-40 py-3.5 rounded-full bg-[#1A1D20] hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-md active:scale-95 cursor-pointer text-center"
             >
               Let's go
             </button>
@@ -321,18 +346,18 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
             </p>
           </div>
 
-          {/* Figma Photo Card: Friends laughing in car selfie with pastel accent squares */}
-          <div className="my-auto py-4 flex justify-center">
-            <div className="relative w-64 h-48 flex items-center justify-center">
-              {/* Top-left soft lilac accent card */}
-              <div className="absolute top-0 left-0 w-44 h-40 bg-[#E9D5FF] rounded-3xl -rotate-6 transform"></div>
-              {/* Bottom-right soft peach accent card */}
-              <div className="absolute bottom-0 right-0 w-44 h-40 bg-[#FED7AA] rounded-3xl rotate-6 transform"></div>
-              {/* Foreground Photo Card */}
-              <div className="relative z-10 w-56 h-40 rounded-2xl overflow-hidden shadow-lg border-2 border-white">
+          {/* Figma Photo Card: Friends laughing in car selfie with upright pastel accent squares */}
+          <div className="my-auto py-5 flex justify-center">
+            <div className="relative w-[265px] h-[188px] flex items-center justify-center">
+              {/* Top-left soft lilac accent card (#EBC8FE) - UPRIGHT, NOT ROTATED */}
+              <div className="absolute -top-3.5 -left-5 w-36 h-36 bg-[#EBC8FE] rounded-[22px]"></div>
+              {/* Bottom-right soft peach accent card (#FEAE89) - UPRIGHT, NOT ROTATED */}
+              <div className="absolute -bottom-3.5 -right-5 w-36 h-36 bg-[#FEAE89] rounded-[22px]"></div>
+              {/* Foreground Photo Card (Exact 265x188 Figma Frame asset) */}
+              <div className="relative z-10 w-[265px] h-[188px] rounded-[22px] overflow-hidden shadow-md">
                 <img
-                  src="https://images.unsplash.com/photo-1511632765486-a01980e01a18?auto=format&fit=crop&w=600&q=80"
-                  alt="Friends sharing carpool ride"
+                  src={roadTripFriendsImg}
+                  alt="Friends laughing on a carpool road trip"
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -347,49 +372,73 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
           )}
 
           {/* Social Sign-In Methods (Figma exact divided list layout) */}
-          <div className="border-t border-slate-100 divide-y divide-slate-100">
-            {/* Google */}
+          <div className="border-t border-b border-slate-200 divide-y divide-slate-200">
+            {/* 1. Google */}
             <button
               onClick={handleGoogleSignIn}
               disabled={oauthLoadingProvider !== null}
-              className="w-full py-4 px-2 flex items-center gap-4 text-left font-bold text-sm text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+              className="w-full py-4 px-6 flex items-center relative text-[#1A1D20] font-semibold text-sm hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
             >
-              {oauthLoadingProvider === 'google' ? (
-                <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.36 7.31 24 12 24z"/>
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15z"/>
-                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                </svg>
-              )}
-              <span>Continue with Google</span>
+              <div className="w-6 flex items-center justify-center shrink-0">
+                {oauthLoadingProvider === 'google' ? (
+                  <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.36 7.31 24 12 24z"/>
+                    <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.94 0 12s.46 3.84 1.26 5.42l4.02-3.15z"/>
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.64 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                  </svg>
+                )}
+              </div>
+              <span className="flex-1 text-center font-bold text-slate-800 -ml-6">Continue with Google</span>
             </button>
 
-            {/* Apple */}
+            {/* 2. Facebook */}
+            <button
+              onClick={handleFacebookSignIn}
+              disabled={oauthLoadingProvider !== null}
+              className="w-full py-4 px-6 flex items-center relative text-[#1A1D20] font-semibold text-sm hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <div className="w-6 flex items-center justify-center shrink-0">
+                {oauthLoadingProvider === 'facebook' ? (
+                  <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#1877F2" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                )}
+              </div>
+              <span className="flex-1 text-center font-bold text-slate-800 -ml-6">Continue with Facebook</span>
+            </button>
+
+            {/* 3. Apple */}
             <button
               onClick={handleAppleSignIn}
               disabled={oauthLoadingProvider !== null}
-              className="w-full py-4 px-2 flex items-center gap-4 text-left font-bold text-sm text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+              className="w-full py-4 px-6 flex items-center relative text-[#1A1D20] font-semibold text-sm hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
             >
-              {oauthLoadingProvider === 'apple' ? (
-                <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <svg className="w-5 h-5 shrink-0 fill-slate-900" viewBox="0 0 24 24">
-                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.42c.64-.78 1.08-1.87.96-2.96-.93.04-2.07.62-2.73 1.4-.58.67-1.09 1.77-.95 2.83 1.04.08 2.08-.5 2.72-1.27z"/>
-                </svg>
-              )}
-              <span>Continue with Apple</span>
+              <div className="w-6 flex items-center justify-center shrink-0">
+                {oauthLoadingProvider === 'apple' ? (
+                  <div className="w-5 h-5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-5 h-5 shrink-0 fill-slate-900" viewBox="0 0 24 24">
+                    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.42c.64-.78 1.08-1.87.96-2.96-.93.04-2.07.62-2.73 1.4-.58.67-1.09 1.77-.95 2.83 1.04.08 2.08-.5 2.72-1.27z"/>
+                  </svg>
+                )}
+              </div>
+              <span className="flex-1 text-center font-bold text-slate-800 -ml-6">Continue with Apple</span>
             </button>
 
-            {/* Email */}
+            {/* 4. Email */}
             <button
               onClick={() => onNavigateScreen('login')}
-              className="w-full py-4 px-2 flex items-center gap-4 text-left font-bold text-sm text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="w-full py-4 px-6 flex items-center relative text-[#1A1D20] font-semibold text-sm hover:bg-slate-50 transition-colors cursor-pointer"
             >
-              <Mail className="w-5 h-5 shrink-0 text-slate-700" />
-              <span>Continue with email</span>
+              <div className="w-6 flex items-center justify-center shrink-0">
+                <Mail className="w-5 h-5 text-slate-800" />
+              </div>
+              <span className="flex-1 text-center font-bold text-slate-800 -ml-6">Continue with email</span>
             </button>
           </div>
 
@@ -408,68 +457,134 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
     );
   }
 
-  // ================= 3. 3 THINGS TO KNOW (FIGMA FRAMES 3-7) =================
+  // ================= 3. 3 THINGS TO KNOW & PROFILE INTRO (FIGMA CARDS 3-7) =================
   if (currentScreen === 'onboard' && onboardRuleStep >= 1 && onboardRuleStep <= 5) {
     const rulesData = [
       {
         stepNum: 1,
-        title: 'Before you get started, here are 3 things you need to know',
+        title: '3 things to know about before you get started',
         subtitle: 'Our community is built on shared respect, safety, and mutual punctuality.',
-        icon: <HelpCircle className="w-12 h-12 text-[#F05A28]" />,
+        icon: (
+          <div className="w-20 h-20 rounded-3xl bg-[#F05A28]/10 flex items-center justify-center mx-auto shadow-inner">
+            <HelpCircle className="w-10 h-10 text-[#F05A28]" />
+          </div>
+        ),
         bullets: [
-          'TopRide is cost-sharing carpool, not an on-demand taxi.',
-          'Cash is not allowed; all bookings are handled securely online.',
-          'Punctuality is essential — arrive 10 minutes early.'
+          'Top is a carpool community, not an on-demand taxi.',
+          'Cash or e-transfers are not possible — online bookings only.',
+          'Showing up 10 minutes before departure is required.'
         ],
         btnLabel: 'Next'
       },
       {
         stepNum: 2,
-        title: 'TopRide is a carpool community, not a taxi service or Uber and Lyft.',
-        subtitle: 'Drivers are regular commuters traveling on the same route as you.',
-        icon: <Car className="w-12 h-12 text-[#F05A28]" />,
+        title: 'Top is a carpool community, not like other taxi services',
+        subtitle: 'Drivers are regular commuters sharing their journeys to offset fuel and toll costs, not commercial taxi drivers.',
+        icon: (
+          <div className="w-28 h-28 mx-auto flex items-center justify-center relative select-none">
+            <svg viewBox="0 0 100 100" className="w-24 h-24">
+              <circle cx="50" cy="50" r="44" stroke="#EF4444" strokeWidth="7" fill="#FEF2F2" />
+              <line x1="20" y1="20" x2="80" y2="80" stroke="#EF4444" strokeWidth="7" strokeLinecap="round" />
+              <g transform="translate(24, 30) scale(0.52)">
+                <rect x="36" y="2" width="28" height="10" rx="3" fill="#F59E0B" stroke="#1A1D20" strokeWidth="2.5" />
+                <text x="50" y="10" fontSize="7.5" fontWeight="900" textAnchor="middle" fill="#1A1D20">TAXI</text>
+                <path d="M10 32 L22 16 C26 13, 74 13, 78 16 L90 32 L95 44 C95 48, 92 50, 88 50 L12 50 C8 50, 5 48, 5 44 Z" fill="#1A1D20" />
+                <circle cx="26" cy="52" r="8" fill="#475569" stroke="#1A1D20" strokeWidth="2" />
+                <circle cx="74" cy="52" r="8" fill="#475569" stroke="#1A1D20" strokeWidth="2" />
+              </g>
+            </svg>
+          </div>
+        ),
         bullets: [
-          'Drivers are sharing their journey to offset fuel and toll costs.',
-          'Respect the driver’s vehicle, luggage space, and quiet hours.',
-          'Treat fellow passengers with courtesy and friendly conversation.'
+          'Drivers are sharing rides to reduce traffic and emissions.',
+          'Respect the driver\'s vehicle, luggage space, and quiet hours.',
+          'Treat fellow carpoolers with courtesy and friendliness.'
         ],
         btnLabel: 'Next'
       },
       {
         stepNum: 3,
-        title: 'Cash or e-transfers are not allowed. Use our online booking system.',
-        subtitle: 'All transactions are protected and managed through TopRide.',
-        icon: <CreditCard className="w-12 h-12 text-[#F05A28]" />,
+        title: 'Cash or e-transfers are not possible. Use our online booking system',
+        subtitle: 'All bookings must be secured through TopRide so both driver and passenger are protected with guaranteed reservations and refunds.',
+        icon: (
+          <div className="w-28 h-28 mx-auto flex items-center justify-center relative select-none">
+            <svg viewBox="0 0 100 100" className="w-24 h-24">
+              <path d="M50 10 L82 22 C82 55, 50 85, 50 85 C50 85, 18 55, 18 22 Z" fill="#FEF3C7" stroke="#F59E0B" strokeWidth="3.5" />
+              <rect x="32" y="32" width="36" height="24" rx="4" fill="#1A1D20" />
+              <line x1="32" y1="40" x2="68" y2="40" stroke="#F05A28" strokeWidth="2.5" />
+              <rect x="37" y="47" width="8" height="4" rx="1" fill="#FFFFFF" opacity="0.8" />
+              <circle cx="68" cy="62" r="12" fill="#10B981" />
+              <path d="M64 62 L67 65 L73 59" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+          </div>
+        ),
         bullets: [
           'Never pay cash or off-platform money directly to drivers.',
-          'Seats are officially reserved only after payment confirmation.',
+          'Seats are officially reserved only after online payment.',
           'Automated refunds protect you if the driver cancels the trip.'
         ],
         btnLabel: 'Next'
       },
       {
         stepNum: 4,
-        title: 'Please show up 10 minutes before departure.',
-        subtitle: 'Punctuality respects everyone\'s schedule and keeps rides on time.',
-        icon: <Clock className="w-12 h-12 text-[#F05A28]" />,
+        title: 'Passenger: Showing up 10 minutes before departure is REQUIRED!',
+        subtitle: 'Punctuality respects everyone\'s schedule and keeps rides on time. Drivers depart promptly.',
+        icon: (
+          <div className="w-28 h-28 mx-auto flex items-center justify-center relative select-none">
+            <svg viewBox="0 0 100 100" className="w-24 h-24">
+              <circle cx="50" cy="50" r="42" fill="#EFF6FF" stroke="#3B82F6" strokeWidth="4" />
+              <line x1="50" y1="14" x2="50" y2="20" stroke="#1E40AF" strokeWidth="3" strokeLinecap="round" />
+              <line x1="86" y1="50" x2="80" y2="50" stroke="#1E40AF" strokeWidth="3" strokeLinecap="round" />
+              <line x1="50" y1="86" x2="50" y2="80" stroke="#1E40AF" strokeWidth="3" strokeLinecap="round" />
+              <line x1="14" y1="50" x2="20" y2="50" stroke="#1E40AF" strokeWidth="3" strokeLinecap="round" />
+              <path d="M50 50 L50 18 A32 32 0 0 1 78 34 Z" fill="#F05A28" opacity="0.35" />
+              <line x1="50" y1="50" x2="50" y2="24" stroke="#1A1D20" strokeWidth="3.5" strokeLinecap="round" />
+              <line x1="50" y1="50" x2="72" y2="38" stroke="#F05A28" strokeWidth="3.5" strokeLinecap="round" />
+              <circle cx="50" cy="50" r="4" fill="#F05A28" />
+            </svg>
+          </div>
+        ),
         bullets: [
-          'Confirm your exact meeting spot with your driver beforehand.',
-          'Communicate via in-app chat if you experience any travel delays.',
-          'Drivers depart on schedule to respect other passengers\' time.'
+          'Confirm your exact pickup meeting point with your driver.',
+          'Communicate in advance via chat if any delay occurs.',
+          'Drivers depart on time to maintain arrival commitments.'
         ],
         btnLabel: 'Next'
       },
       {
         stepNum: 5,
-        title: 'Got it? Great!',
-        subtitle: 'By tapping \'I agree\', you agree to the rules, to our terms of service and to our release policy.',
-        icon: <CheckCircle2 className="w-12 h-12 text-emerald-600" />,
+        title: 'Let\'s establish your profile information',
+        subtitle: 'Enter your personal details to get verified, build community trust, and start booking or sharing rides.',
+        icon: (
+          <div className="w-36 h-24 mx-auto flex items-center justify-center select-none">
+            <svg viewBox="0 0 240 160" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto drop-shadow-xs">
+              <path d="M50 48 C75 22, 165 22, 190 48 L210 70 L30 70 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" strokeLinejoin="round" />
+              <path d="M70 36 L62 65" stroke="#7EC6EC" strokeWidth="2.2" strokeLinecap="round" />
+              <path d="M80 34 L72 65" stroke="#7EC6EC" strokeWidth="1.6" strokeLinecap="round" />
+              <rect x="115" y="32" width="10" height="5" rx="2" fill="#1A1D20" />
+              <path d="M26 62 C20 62, 16 66, 18 72 C20 76, 26 76, 29 72 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
+              <path d="M214 62 C220 62, 224 66, 222 72 C220 76, 214 76, 211 72 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
+              <path d="M20 75 C18 85, 20 95, 24 105 C28 112, 38 116, 50 116 L190 116 C202 116, 212 112, 216 105 C220 95, 222 85, 220 75 C215 72, 195 70, 185 70 C165 72, 75 72, 55 70 C45 70, 25 72, 20 75 Z" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" strokeLinejoin="round" />
+              <path d="M72 70 C74 85, 78 98, 82 105" stroke="#1A1D20" strokeWidth="2" strokeLinecap="round" />
+              <path d="M168 70 C166 85, 162 98, 158 105" stroke="#1A1D20" strokeWidth="2" strokeLinecap="round" />
+              <ellipse cx="46" cy="88" rx="14" ry="10" transform="rotate(-12 46 88)" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
+              <circle cx="46" cy="88" r="5" fill="#7EC6EC" stroke="#1A1D20" strokeWidth="1.5" />
+              <ellipse cx="194" cy="88" rx="14" ry="10" transform="rotate(12 194 88)" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
+              <circle cx="194" cy="88" r="5" fill="#7EC6EC" stroke="#1A1D20" strokeWidth="1.5" />
+              <path d="M30 116 L30 135 C30 144, 45 146, 60 146 L180 146 C195 146, 210 144, 210 135 L210 116" fill="#FFFFFF" stroke="#1A1D20" strokeWidth="2.5" />
+              <rect x="75" y="124" width="90" height="16" rx="4" fill="#1A1D20" />
+              <rect x="22" y="132" width="12" height="18" rx="4" fill="#1A1D20" />
+              <rect x="206" y="132" width="12" height="18" rx="4" fill="#1A1D20" />
+              <line x1="16" y1="152" x2="224" y2="152" stroke="#1A1D20" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        ),
         bullets: [
-          '✅ We\'re carpoolers, not taxi or Uber',
-          '✅ No cash allowed — online bookings only',
-          '✅ Show up 10 minutes early'
+          'Verify your age (18+ policy confirmation).',
+          'Add a solo portrait photo for member recognition.',
+          'Choose your travel role (passenger, driver, or both).'
         ],
-        btnLabel: 'I agree'
+        btnLabel: 'Next'
       }
     ];
 
@@ -500,7 +615,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
 
           {/* Main Content */}
           <div className="my-auto py-6 text-center space-y-4">
-            <div className="w-24 h-24 rounded-3xl bg-[#F05A28]/10 flex items-center justify-center mx-auto shadow-inner">
+            <div className="flex items-center justify-center mx-auto">
               {currentRule.icon}
             </div>
 
@@ -1370,7 +1485,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = ({
               </div>
             ) : (
               <>
-                <span>Go to TopRide Home</span>
+                <span>All done</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}

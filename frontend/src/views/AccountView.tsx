@@ -212,9 +212,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (confirm('Are you sure you want to log out of TopRide?')) {
-                onLogout();
-              }
+              onLogout();
             }}
             className="px-3.5 py-2.5 rounded-2xl border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
             title="Log out"
@@ -234,9 +232,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
               key={item.id}
               onClick={() => {
                 if (item.id === 'logout') {
-                  if (confirm('Are you sure you want to log out of TopRide?')) {
-                    onLogout();
-                  }
+                  onLogout();
                   return;
                 }
                 setActiveSection(item.id);

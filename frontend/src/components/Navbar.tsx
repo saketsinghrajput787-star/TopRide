@@ -186,9 +186,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm('Are you sure you want to log out of TopRide?')) {
-                    onLogout();
-                  }
+                  onLogout();
                 }}
                 className="p-2.5 rounded-xl border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-slate-500 hover:text-rose-600 transition-colors cursor-pointer flex items-center gap-1.5"
                 title="Log out"
@@ -258,9 +256,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (confirm('Are you sure you want to log out of TopRide?')) {
-                  onLogout();
-                }
+                onLogout();
               }}
               className="w-9 h-9 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center active:scale-95 transition-transform cursor-pointer"
               title="Log out"
