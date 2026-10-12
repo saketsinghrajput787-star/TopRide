@@ -14,6 +14,9 @@ interface CalendarPickerProps {
   label?: string;
   disabled?: boolean;
   className?: string;
+  align?: 'left' | 'right';
+  id?: string;
+  required?: boolean;
 }
 
 export const CalendarPicker: React.FC<CalendarPickerProps> = ({
@@ -22,6 +25,9 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   label = 'Date',
   disabled = false,
   className = '',
+  align = 'left',
+  id = 'btn-calendar-picker',
+  required = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -131,18 +137,18 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       {label && (
-        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-          {label}
+        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+          {label} {required && <span className="text-rose-500">*</span>}
         </label>
       )}
 
       {/* Modern Read-Only Date Button */}
       <button
         type="button"
-        id="btn-calendar-picker"
+        id={id}
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between bg-white rounded-2xl border border-slate-200 shadow-2xs hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-slate-950 focus:border-transparent transition-all px-3.5 py-3 cursor-pointer text-left group"
+        className="w-full flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-2xs hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-slate-950 focus:border-transparent transition-all px-3.5 py-3 cursor-pointer text-left group"
         aria-haspopup="dialog"
         aria-expanded={isOpen}
       >
@@ -167,7 +173,9 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
           />
 
           <div 
-            className="fixed inset-x-4 bottom-4 z-50 sm:absolute sm:inset-x-auto sm:bottom-auto sm:top-full sm:right-0 sm:mt-2 w-auto sm:w-80 bg-white rounded-3xl sm:rounded-2xl shadow-2xl border border-slate-200 p-4 sm:p-4.5 animate-in fade-in zoom-in-95 duration-150"
+            className={`fixed inset-x-4 bottom-4 z-50 sm:absolute sm:inset-x-auto sm:bottom-auto sm:top-full ${
+              align === 'left' ? 'sm:left-0 sm:right-auto' : 'sm:right-0 sm:left-auto'
+            } sm:mt-2 w-auto sm:w-80 bg-white rounded-3xl sm:rounded-2xl shadow-2xl border border-slate-200 p-4 sm:p-4.5 animate-in fade-in zoom-in-95 duration-150`}
             role="dialog"
             aria-modal="true"
             aria-label="Select Date"

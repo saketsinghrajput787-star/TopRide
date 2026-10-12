@@ -97,4 +97,57 @@ export function isPastDate(isoDate: string): boolean {
   return canonical < today;
 }
 
+/**
+ * Returns current local time in HH:mm 24-hour format.
+ */
+export function getCurrentTimeHHmm(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+/**
+ * Checks if a string is a valid 24-hour HH:mm time format.
+ */
+export function isValidTimeFormat(timeStr?: string | null): boolean {
+  if (!timeStr) return false;
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(timeStr.trim());
+}
+
+/**
+ * Formats a 24-hour "HH:mm" time into a friendly display format:
+ * e.g. "08:00" -> "08:00 AM", "14:30" -> "02:30 PM"
+ */
+export function formatDisplayTime(timeStr?: string | null): string {
+  if (!timeStr || !isValidTimeFormat(timeStr)) {
+    return timeStr || '';
+  }
+  const [hStr, mStr] = timeStr.trim().split(':');
+  const hour = parseInt(hStr, 10);
+  const minute = parseInt(mStr, 10);
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${String(displayHour).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
+}
+
+/**
+ * Returns whether a given HH:mm time on a given date (ISO YYYY-MM-DD)
+ * is already in the past compared to the current local time.
+ */
+export function isPastTime(timeStr: string, isoDate?: string | null): boolean {
+  if (!isoDate) return false;
+  if (isPastDate(isoDate)) {
+    return true; // if date is in past, time is in past
+  }
+  const today = getTodayIso();
+  if (toCanonicalIsoDate(isoDate) > today) {
+    return false; // future date is never in the past
+  }
+  // Date is today: check if time has passed
+  const current = getCurrentTimeHHmm();
+  return timeStr < current;
+}
+
 export { MONTH_NAMES };
+

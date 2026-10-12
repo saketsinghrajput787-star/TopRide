@@ -19,7 +19,17 @@ import {
 } from 'lucide-react';
 import { LocationSearchInput } from '../components/LocationSearchInput';
 import { MapRoutePreview } from '../components/MapRoutePreview';
+import { CalendarPicker } from '../components/CalendarPicker';
+import { TimePicker } from '../components/TimePicker';
 import { getFallbackCoordinates } from '../services/mapbox';
+import { 
+  getTodayIso, 
+  formatDisplayDate, 
+  formatDisplayTime, 
+  isPastDate, 
+  isPastTime, 
+  isValidTimeFormat 
+} from '../utils/dateUtils';
 
 interface PostTripViewProps {
   vehicles: Vehicle[];
@@ -57,8 +67,14 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
   });
   const [destinationDetail, setDestinationDetail] = useState('Gachibowli DLF / Hitec City');
 
-  const [date, setDate] = useState('Sat, 10 Oct');
-  const [time, setTime] = useState('08:00');
+  const [date, setDate] = useState<string>(() => getTodayIso());
+  const [time, setTime] = useState<string>(() => {
+    const now = new Date();
+    const target = new Date(now.getTime() + 60 * 60 * 1000);
+    const h = String(target.getHours()).padStart(2, '0');
+    return `${h}:00`;
+  });
+  const [dateTimeError, setDateTimeError] = useState<string | null>(null);
   const [seats, setSeats] = useState<number>(3);
   const [price, setPrice] = useState<number | null>(null);
   const [pricingBreakdown, setPricingBreakdown] = useState<PriceBreakdown | null>(null);
@@ -175,6 +191,23 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
 
   const handleReview = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!origin || !destination) {
+      showToast('Please specify both departure and arrival points.');
+      return;
+    }
+    if (!date || isPastDate(date)) {
+      showToast('Please select a valid upcoming travel date.');
+      return;
+    }
+    if (!time || !isValidTimeFormat(time)) {
+      showToast('Please select a valid departure time.');
+      return;
+    }
+    if (isPastTime(time, date)) {
+      setDateTimeError('Departure time cannot be in the past for today. Please choose an upcoming time.');
+      showToast('Departure time cannot be in the past for today.');
+      return;
+    }
     if (pricingLoading) {
       showToast('Please wait for route pricing to calculate.');
       return;
@@ -187,10 +220,15 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
       showToast('Route inputs changed. Please wait for updated pricing.');
       return;
     }
+    setDateTimeError(null);
     setStep('review');
   };
 
   const handlePublish = () => {
+    if (!date || isPastDate(date) || isPastTime(time, date)) {
+      showToast('Please select a valid upcoming date and time.');
+      return;
+    }
     if (pricingLoading || pricingError || !pricingBreakdown || price === null || currentRouteKey !== estimatedRouteKey) {
       showToast('Authoritative pricing estimate required before publishing.');
       return;
@@ -349,33 +387,49 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
             </div>
           )}
 
-          {/* Date & Time */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Date
-              </label>
-              <input
-                type="text"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold text-slate-900 text-sm focus:outline-hidden"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                Departure Time
-              </label>
-              <input
-                type="text"
-                required
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold text-slate-900 text-sm focus:outline-hidden"
-              />
-            </div>
+          {/* Date & Departure Time Interactive Pickers */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <CalendarPicker
+              label="Date"
+              required
+              id="field-trip-date"
+              value={date}
+              align="left"
+              onChange={(newIsoDate) => {
+                setDate(newIsoDate);
+                if (newIsoDate === getTodayIso() && isPastTime(time, newIsoDate)) {
+                  setDateTimeError(`Selected departure time (${formatDisplayTime(time)}) has already passed for today. Please select an upcoming time.`);
+                } else {
+                  setDateTimeError(null);
+                }
+              }}
+            />
+
+            <TimePicker
+              label="Departure Time"
+              required
+              id="field-trip-time"
+              value={time}
+              selectedDate={date}
+              align="right"
+              onChange={(newTime) => {
+                setTime(newTime);
+                if (isPastTime(newTime, date)) {
+                  setDateTimeError('Departure time cannot be in the past for today. Please select an upcoming time.');
+                } else {
+                  setDateTimeError(null);
+                }
+              }}
+            />
           </div>
+
+          {/* Validation Warning Alert for Date/Time */}
+          {dateTimeError && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{dateTimeError}</span>
+            </div>
+          )}
 
           {/* Seats & Platform Market Price */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
@@ -587,11 +641,11 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-200 text-xs">
               <div>
                 <span className="text-slate-400 block">Date</span>
-                <span className="font-bold text-slate-900">{date}</span>
+                <span className="font-bold text-slate-900">{formatDisplayDate(date)}</span>
               </div>
               <div>
                 <span className="text-slate-400 block">Time</span>
-                <span className="font-bold text-slate-900">{time}</span>
+                <span className="font-bold text-slate-900">{formatDisplayTime(time)}</span>
               </div>
               <div>
                 <span className="text-slate-400 block">Available</span>
@@ -663,7 +717,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
 
       <div className="p-4 bg-white rounded-2xl border border-slate-200 text-left text-xs space-y-1">
         <div className="font-bold text-slate-900">{origin} → {destination}</div>
-        <div className="text-slate-500">{date} at {time} • {seats} seats {price !== null ? `at ₹${price}` : ''}</div>
+        <div className="text-slate-500">{formatDisplayDate(date)} at {formatDisplayTime(time)} • {seats} seats {price !== null ? `at ₹${price}` : ''}</div>
       </div>
 
       <div className="space-y-3">
