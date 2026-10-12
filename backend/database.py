@@ -1218,8 +1218,17 @@ def insert_trip_in_db(
             )
             calculated_final_price = calculated_base_price
         except Exception:
-            calculated_final_price = 650.0
-            calculated_base_price = 650.0
+            try:
+                from backend.pricing.base_price import BasePriceEngine
+                calculated_base_price = BasePriceEngine.calculate_base_price(
+                    origin=payload.origin,
+                    destination=payload.destination,
+                    vehicle=veh_cat
+                )
+                calculated_final_price = calculated_base_price
+            except Exception:
+                calculated_base_price = 200.0
+                calculated_final_price = 200.0
         calculated_metadata = {"fallback": True, "error": str(pr_err)}
 
     # 3. Attempt transactional RPC first

@@ -27,6 +27,12 @@ export const CITY_COORDINATES: Record<string, { lat: number; lng: number; addres
   jaipur: { lat: 26.9124, lng: 75.7873, address: 'Jaipur, Rajasthan, India' },
   ahmedabad: { lat: 23.0225, lng: 72.5714, address: 'Ahmedabad, Gujarat, India' },
   kolkata: { lat: 22.5726, lng: 88.3639, address: 'Kolkata, West Bengal, India' },
+  chandigarh: { lat: 30.7333, lng: 76.7794, address: 'Chandigarh, India' },
+  agra: { lat: 27.1767, lng: 78.0081, address: 'Agra, Uttar Pradesh, India' },
+  lucknow: { lat: 26.8467, lng: 80.9462, address: 'Lucknow, Uttar Pradesh, India' },
+  surat: { lat: 21.1702, lng: 72.8311, address: 'Surat, Gujarat, India' },
+  bhopal: { lat: 23.2599, lng: 77.4126, address: 'Bhopal, Madhya Pradesh, India' },
+  indore: { lat: 22.7196, lng: 75.8577, address: 'Indore, Madhya Pradesh, India' },
 };
 
 export function getFallbackCoordinates(cityName: string): { lat: number; lng: number; address: string } | null {

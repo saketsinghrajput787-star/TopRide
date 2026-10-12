@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Vehicle, Trip, ScreenId, User, LocationData, PriceBreakdown } from '../types';
 import { api } from '../api';
 import { 
@@ -13,10 +13,13 @@ import {
   TrendingUp,
   ShieldCheck,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { LocationSearchInput } from '../components/LocationSearchInput';
 import { MapRoutePreview } from '../components/MapRoutePreview';
+import { getFallbackCoordinates } from '../services/mapbox';
 
 interface PostTripViewProps {
   vehicles: Vehicle[];
@@ -57,9 +60,14 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
   const [date, setDate] = useState('Sat, 10 Oct');
   const [time, setTime] = useState('08:00');
   const [seats, setSeats] = useState<number>(3);
-  const [price, setPrice] = useState<number>(650);
+  const [price, setPrice] = useState<number | null>(null);
   const [pricingBreakdown, setPricingBreakdown] = useState<PriceBreakdown | null>(null);
   const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const [estimatedRouteKey, setEstimatedRouteKey] = useState<string>('');
+  const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
+  const [routeDurationStr, setRouteDurationStr] = useState<string | null>(null);
+  const [routeGeometry, setRouteGeometry] = useState<any>(null);
   const [showPriceDetails, setShowPriceDetails] = useState(false);
   const [luggageAllowed, setLuggageAllowed] = useState<'None' | 'Small' | 'Medium' | 'Large'>('Medium');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(vehicles[0]?.id || '');
@@ -67,12 +75,44 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
 
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) || (vehicles.length > 0 ? vehicles[0] : null);
 
-  // Automatically fetch platform-calculated dynamic market price (debounced, 0 Mapbox calls)
+  const requestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const currentRouteKey = `${(originLocation?.name || origin).trim().toLowerCase()}->${(destLocation?.name || destination).trim().toLowerCase()}:${seats}:${selectedVehicleId}:${date}:${time}:${routeDistanceKm || 0}`;
+
+  // Automatically fetch platform-calculated dynamic market price (debounced, request-versioned, 0 backend Mapbox calls)
   useEffect(() => {
-    let active = true;
-    const fetchEstimate = async () => {
+    const originName = (originLocation?.name || origin).trim();
+    const destName = (destLocation?.name || destination).trim();
+
+    if (!originName || !destName) {
+      setPricingLoading(false);
+      setPricingBreakdown(null);
+      setPrice(null);
+      setPricingError('Please specify both departure and arrival points.');
+      return;
+    }
+
+    if (originName.toLowerCase() === destName.toLowerCase()) {
+      setPricingLoading(false);
+      setPricingBreakdown(null);
+      setPrice(null);
+      setPricingError('Departure and arrival points cannot be identical.');
+      return;
+    }
+
+    setPricingLoading(true);
+    setPricingError(null);
+
+    const thisRequestId = ++requestIdRef.current;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const timer = setTimeout(async () => {
       try {
-        setPricingLoading(true);
         const vehCategory = selectedVehicle?.model
           ? (['innova', 'xuv', 'harrier', 'safari', 'creta', 'suv'].some(w => (selectedVehicle.make + ' ' + selectedVehicle.model).toLowerCase().includes(w))
               ? 'suv'
@@ -82,8 +122,8 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
           : 'sedan';
 
         const res = await api.estimatePricing({
-          origin: originLocation?.name || origin,
-          destination: destLocation?.name || destination,
+          origin: originName,
+          destination: destName,
           travelDate: date,
           departureTime: time,
           originLat: originLocation?.latitude,
@@ -93,32 +133,69 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
           totalSeats: seats,
           availableSeats: seats,
           vehicleCategory: vehCategory,
-        });
-        if (active && res && res.finalPrice) {
-          setPricingBreakdown(res);
-          setPrice(res.finalPrice);
-        }
-      } catch (err) {
-        console.warn('Dynamic pricing estimate note:', err);
-      } finally {
-        if (active) setPricingLoading(false);
-      }
-    };
+          routeDistanceKm: routeDistanceKm || undefined,
+          durationStr: routeDurationStr || undefined,
+          routeGeometry: routeGeometry || undefined,
+        }, controller.signal);
 
-    const timer = setTimeout(fetchEstimate, 400);
+        if (thisRequestId === requestIdRef.current) {
+          if (res && typeof res.finalPrice === 'number') {
+            setPricingBreakdown(res);
+            setPrice(res.finalPrice);
+            setEstimatedRouteKey(currentRouteKey);
+            setPricingError(null);
+          } else {
+            setPricingError('Unable to calculate market price for this route.');
+            setPricingBreakdown(null);
+            setPrice(null);
+          }
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || controller.signal.aborted) {
+          return;
+        }
+        if (thisRequestId === requestIdRef.current) {
+          console.warn('Dynamic pricing estimate note:', err);
+          const errorMsg = err?.detail || err?.message || 'Unable to calculate price for this route.';
+          setPricingError(typeof errorMsg === 'string' ? errorMsg : 'Pricing calculation failed');
+          setPricingBreakdown(null);
+          setPrice(null);
+        }
+      } finally {
+        if (thisRequestId === requestIdRef.current) {
+          setPricingLoading(false);
+        }
+      }
+    }, 400);
+
     return () => {
-      active = false;
       clearTimeout(timer);
     };
-  }, [origin, destination, date, time, seats, selectedVehicleId, originLocation, destLocation]);
+  }, [origin, destination, date, time, seats, selectedVehicleId, originLocation, destLocation, routeDistanceKm, routeDurationStr]);
 
   const handleReview = (e: React.FormEvent) => {
     e.preventDefault();
+    if (pricingLoading) {
+      showToast('Please wait for route pricing to calculate.');
+      return;
+    }
+    if (pricingError || !pricingBreakdown || price === null) {
+      showToast(pricingError || 'Please resolve route pricing before continuing.');
+      return;
+    }
+    if (currentRouteKey !== estimatedRouteKey) {
+      showToast('Route inputs changed. Please wait for updated pricing.');
+      return;
+    }
     setStep('review');
   };
 
   const handlePublish = () => {
-    const finalCalculatedPrice = pricingBreakdown?.finalPrice || price;
+    if (pricingLoading || pricingError || !pricingBreakdown || price === null || currentRouteKey !== estimatedRouteKey) {
+      showToast('Authoritative pricing estimate required before publishing.');
+      return;
+    }
+    const finalCalculatedPrice = pricingBreakdown.finalPrice;
     const newTripPayload: any = {
       driverId: currentUser.id,
       driverName: currentUser.name,
@@ -141,13 +218,15 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
       date,
       departureTime: time,
       arrivalTime: '16:30',
-      duration: '8h 30m',
+      duration: routeDurationStr || (pricingBreakdown.durationMinutes ? `${Math.floor(pricingBreakdown.durationMinutes / 60)}h ${pricingBreakdown.durationMinutes % 60}m` : '8h 30m'),
       totalSeats: seats,
       availableSeats: seats,
       pricePerSeat: finalCalculatedPrice,
-      basePrice: pricingBreakdown?.basePrice,
+      basePrice: pricingBreakdown.basePrice,
       currentMarketPrice: finalCalculatedPrice,
-      pricingMetadata: pricingBreakdown || undefined,
+      pricingMetadata: pricingBreakdown,
+      distanceKm: pricingBreakdown.distanceKm || routeDistanceKm,
+      routeGeometry: routeGeometry || undefined,
       currency: '₹',
       vehicleId: selectedVehicle?.id || undefined,
       vehicle: selectedVehicle || undefined,
@@ -193,9 +272,8 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                 value={origin}
                 onChange={(val) => {
                   setOrigin(val);
-                  if (originLocation && originLocation.name !== val) {
-                    setOriginLocation({ name: val, latitude: 12.9716, longitude: 77.5946 });
-                  }
+                  const fallback = getFallbackCoordinates(val);
+                  setOriginLocation(fallback ? { name: val, formattedAddress: fallback.address, latitude: fallback.lat, longitude: fallback.lng } : null);
                 }}
                 onSelectLocation={(loc) => {
                   setOrigin(loc.name);
@@ -223,9 +301,8 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                 value={destination}
                 onChange={(val) => {
                   setDestination(val);
-                  if (destLocation && destLocation.name !== val) {
-                    setDestLocation({ name: val, latitude: 17.3850, longitude: 78.4867 });
-                  }
+                  const fallback = getFallbackCoordinates(val);
+                  setDestLocation(fallback ? { name: val, formattedAddress: fallback.address, latitude: fallback.lat, longitude: fallback.lng } : null);
                 }}
                 onSelectLocation={(loc) => {
                   setDestination(loc.name);
@@ -258,8 +335,15 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
               <MapRoutePreview
                 origin={originLocation?.name || origin}
                 destination={destLocation?.name || destination}
-                originCoords={originLocation ? { latitude: originLocation.latitude, longitude: originLocation.longitude } : undefined}
-                destCoords={destLocation ? { latitude: destLocation.latitude, longitude: destLocation.longitude } : undefined}
+                originCoords={originLocation?.latitude && originLocation?.longitude ? { latitude: originLocation.latitude, longitude: originLocation.longitude } : undefined}
+                destCoords={destLocation?.latitude && destLocation?.longitude ? { latitude: destLocation.latitude, longitude: destLocation.longitude } : undefined}
+                onRouteCalculated={(r) => {
+                  if (r.distanceKm > 0) {
+                    setRouteDistanceKm(r.distanceKm);
+                    setRouteDurationStr(r.durationText);
+                    setRouteGeometry(r.geometry);
+                  }
+                }}
                 height="h-44 sm:h-52"
               />
             </div>
@@ -324,27 +408,54 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                   <ShieldCheck className="w-3 h-3" /> Market-priced
                 </span>
               </div>
-              <div className="px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
-                <div>
-                  <div className="text-lg font-black text-slate-950 flex items-baseline gap-1">
-                    <span>₹{pricingBreakdown?.finalPrice || price}</span>
-                    <span className="text-xs font-medium text-slate-500">/ seat</span>
-                    {pricingLoading && <span className="text-[10px] text-slate-400 font-normal">updating...</span>}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    Base: ₹{pricingBreakdown?.basePrice || 650} • Demand: {pricingBreakdown && pricingBreakdown.demandMultiplier > 1.05 ? 'High' : (pricingBreakdown && pricingBreakdown.demandMultiplier < 0.98 ? 'Low' : 'Normal')}
-                  </div>
+              {pricingLoading && !pricingBreakdown ? (
+                <div className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-2 text-xs text-slate-500">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
+                  <span>Calculating route market fare...</span>
                 </div>
-                {pricingBreakdown && (
-                  <button
-                    type="button"
-                    onClick={() => setShowPriceDetails(!showPriceDetails)}
-                    className="text-xs font-bold text-slate-700 hover:text-slate-950 flex items-center gap-0.5 p-1 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
-                  >
-                    Details {showPriceDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-              </div>
+              ) : pricingError && !pricingBreakdown ? (
+                <div className="px-4 py-3 rounded-xl border border-rose-200 bg-rose-50 flex items-center gap-2 text-xs text-rose-700">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{pricingError}</span>
+                </div>
+              ) : (
+                <div className="px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
+                  <div>
+                    <div className="text-lg font-black text-slate-950 flex items-baseline gap-1">
+                      <span>{price !== null ? `₹${price}` : '—'}</span>
+                      <span className="text-xs font-medium text-slate-500">/ seat</span>
+                      {pricingLoading && (
+                        <span className="text-[10px] text-slate-400 font-normal flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> updating...
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {pricingBreakdown ? (
+                        <>
+                          Base: ₹{pricingBreakdown.basePrice} {pricingBreakdown.distanceKm ? `(${pricingBreakdown.distanceKm} km)` : ''} • Demand:{' '}
+                          {pricingBreakdown.demandMultiplier > 1.05
+                            ? 'High'
+                            : pricingBreakdown.demandMultiplier < 0.98
+                            ? 'Low'
+                            : 'Normal'}
+                        </>
+                      ) : (
+                        'Enter origin & destination to calculate fare'
+                      )}
+                    </div>
+                  </div>
+                  {pricingBreakdown && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPriceDetails(!showPriceDetails)}
+                      className="text-xs font-bold text-slate-700 hover:text-slate-950 flex items-center gap-0.5 p-1 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                    >
+                      Details {showPriceDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -358,8 +469,10 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
                 <span className="text-emerald-400 font-black">₹{pricingBreakdown.finalPrice} / seat</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                <div>Route Distance: <span className="font-semibold text-white">{pricingBreakdown.distanceKm ? `${pricingBreakdown.distanceKm} km` : 'Calculated'}</span></div>
+                <div>Distance Source: <span className="font-semibold text-white">{pricingBreakdown.distanceSource === 'road_network' ? 'Road Network' : pricingBreakdown.distanceSource === 'corridor_benchmark' ? 'Corridor Benchmark' : 'Route Estimate'}</span></div>
                 <div>Base Market Value: <span className="font-semibold text-white">₹{pricingBreakdown.basePrice}</span></div>
-                <div>Active Demand Ratio: <span className="font-semibold text-white">{pricingBreakdown.demandSupplyRatio.toFixed(2)}x</span></div>
+                <div>Vehicle Factor: <span className="font-semibold text-white">{pricingBreakdown.vehicleMultiplier ? `${pricingBreakdown.vehicleMultiplier.toFixed(2)}x` : '1.00x'}</span></div>
                 <div>Demand Multiplier: <span className="font-semibold text-white">{pricingBreakdown.demandMultiplier.toFixed(2)}x</span></div>
                 <div>Time-to-Departure: <span className="font-semibold text-white">{pricingBreakdown.timeMultiplier.toFixed(2)}x</span></div>
                 <div>Occupancy Adjustment: <span className="font-semibold text-white">{pricingBreakdown.occupancyMultiplier.toFixed(2)}x</span></div>
@@ -486,7 +599,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
               </div>
               <div>
                 <span className="text-slate-400 block">Seat Fare</span>
-                <span className="font-bold text-slate-900">₹{price}</span>
+                <span className="font-bold text-slate-900">{price !== null ? `₹${price}` : '—'}</span>
               </div>
             </div>
           </div>
@@ -550,7 +663,7 @@ export const PostTripView: React.FC<PostTripViewProps> = ({
 
       <div className="p-4 bg-white rounded-2xl border border-slate-200 text-left text-xs space-y-1">
         <div className="font-bold text-slate-900">{origin} → {destination}</div>
-        <div className="text-slate-500">{date} at {time} • {seats} seats at ₹{price}</div>
+        <div className="text-slate-500">{date} at {time} • {seats} seats {price !== null ? `at ₹${price}` : ''}</div>
       </div>
 
       <div className="space-y-3">

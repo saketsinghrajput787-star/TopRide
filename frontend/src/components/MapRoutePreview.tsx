@@ -20,6 +20,7 @@ interface MapRoutePreviewProps {
   interactive?: boolean;
   className?: string;
   showSummary?: boolean;
+  onRouteCalculated?: (route: RouteData) => void;
 }
 
 export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
@@ -32,6 +33,7 @@ export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
   interactive = true,
   className = '',
   showSummary = true,
+  onRouteCalculated,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
@@ -136,6 +138,9 @@ export const MapRoutePreview: React.FC<MapRoutePreviewProps> = ({
 
           if (route) {
             setRouteInfo(route);
+            if (onRouteCalculated) {
+              onRouteCalculated(route);
+            }
 
             const addRouteLayers = () => {
               if (isCancelled || !mapInstanceRef.current || !map) return;

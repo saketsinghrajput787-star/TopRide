@@ -783,9 +783,16 @@ def estimate_trip_market_price(
     req: PriceEstimateRequest,
     authorization: Optional[str] = Header(None)
 ):
-    token = authorization.split("Bearer ", 1)[1].strip() if authorization and "Bearer " in authorization else None
-    scoped_client = get_user_supabase_client(token)
-    return DynamicPricingEngine.calculate_price(req, client=scoped_client)
+    try:
+        token = authorization.split("Bearer ", 1)[1].strip() if authorization and "Bearer " in authorization else None
+        scoped_client = get_user_supabase_client(token)
+        return DynamicPricingEngine.calculate_price(req, client=scoped_client)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pricing estimation failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

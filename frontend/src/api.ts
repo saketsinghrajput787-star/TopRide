@@ -395,11 +395,31 @@ export const api = {
   },
 
   // Dynamic Market Pricing
-  async estimatePricing(params: PriceEstimateRequest): Promise<PriceBreakdown> {
-    return request<PriceBreakdown>('/api/pricing/estimate', {
+  async estimatePricing(params: PriceEstimateRequest, signal?: AbortSignal): Promise<PriceBreakdown> {
+    const raw = await request<any>('/api/pricing/estimate', {
       method: 'POST',
       body: JSON.stringify(params),
+      signal,
     });
+    return {
+      basePrice: raw.basePrice ?? raw.base_price ?? 0,
+      distanceKm: raw.distanceKm ?? raw.distance_km,
+      durationMinutes: raw.durationMinutes ?? raw.duration_minutes,
+      distanceSource: raw.distanceSource ?? raw.distance_source,
+      vehicleMultiplier: raw.vehicleMultiplier ?? raw.vehicle_multiplier,
+      demandCount: raw.demandCount ?? raw.demand_count ?? 0,
+      supplySeats: raw.supplySeats ?? raw.supply_seats ?? 0,
+      demandSupplyRatio: raw.demandSupplyRatio ?? raw.demand_supply_ratio ?? 1.0,
+      demandMultiplier: raw.demandMultiplier ?? raw.demand_multiplier ?? 1.0,
+      timeMultiplier: raw.timeMultiplier ?? raw.time_multiplier ?? 1.0,
+      occupancyMultiplier: raw.occupancyMultiplier ?? raw.occupancy_multiplier ?? 1.0,
+      rawPrice: raw.rawPrice ?? raw.raw_price ?? raw.finalPrice ?? raw.final_price ?? 0,
+      priceFloor: raw.priceFloor ?? raw.floor ?? 0,
+      priceCeiling: raw.priceCeiling ?? raw.ceiling ?? 0,
+      finalPrice: raw.finalPrice ?? raw.final_price ?? 0,
+      explanation: raw.explanation ?? '',
+      marketSegment: raw.marketSegment ?? raw.market_segment ?? '',
+    };
   },
 
   // Payouts

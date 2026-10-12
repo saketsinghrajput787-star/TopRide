@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, Union, Literal
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import BaseModel, Field, model_validator, ConfigDict, computed_field
 import datetime
 
 class MarketSegment(BaseModel):
@@ -19,6 +19,10 @@ class PriceBreakdown(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     base_price: float = Field(default=650.0, description="Route fundamental base price")
+    distance_km: float = Field(default=0.0, description="Resolved route distance in km")
+    duration_minutes: int = Field(default=0, description="Estimated trip duration in minutes")
+    distance_source: str = Field(default="coordinate_estimate", description="Source of route distance: road_network, corridor_benchmark, or coordinate_estimate")
+    vehicle_multiplier: float = Field(default=1.0, description="Vehicle category multiplier")
     demand_count: int = Field(default=0, description="Active passenger requests in market segment")
     supply_seats: int = Field(default=0, description="Available trip seats in market segment")
     demand_supply_ratio: float = Field(default=1.0, description="Demand / max(Supply, 1)")
@@ -43,6 +47,14 @@ class PriceBreakdown(BaseModel):
             mapped = dict(data)
             if "basePrice" in mapped and "base_price" not in mapped:
                 mapped["base_price"] = mapped.pop("basePrice")
+            if "distanceKm" in mapped and "distance_km" not in mapped:
+                mapped["distance_km"] = mapped.pop("distanceKm")
+            if "durationMinutes" in mapped and "duration_minutes" not in mapped:
+                mapped["duration_minutes"] = mapped.pop("durationMinutes")
+            if "distanceSource" in mapped and "distance_source" not in mapped:
+                mapped["distance_source"] = mapped.pop("distanceSource")
+            if "vehicleMultiplier" in mapped and "vehicle_multiplier" not in mapped:
+                mapped["vehicle_multiplier"] = mapped.pop("vehicleMultiplier")
             if "demandCount" in mapped and "demand_count" not in mapped:
                 mapped["demand_count"] = mapped.pop("demandCount")
             if "supplySeats" in mapped and "supply_seats" not in mapped:
@@ -68,38 +80,67 @@ class PriceBreakdown(BaseModel):
             return mapped
         return data
 
+    @computed_field
     @property
     def basePrice(self) -> float:
         return self.base_price
 
+    @computed_field
+    @property
+    def distanceKm(self) -> float:
+        return self.distance_km
+
+    @computed_field
+    @property
+    def durationMinutes(self) -> int:
+        return self.duration_minutes
+
+    @computed_field
+    @property
+    def distanceSource(self) -> str:
+        return self.distance_source
+
+    @computed_field
+    @property
+    def vehicleMultiplier(self) -> float:
+        return self.vehicle_multiplier
+
+    @computed_field
     @property
     def finalPrice(self) -> float:
         return self.final_price
 
+    @computed_field
     @property
     def priceFloor(self) -> float:
         return self.floor
 
+    @computed_field
     @property
     def priceCeiling(self) -> float:
         return self.ceiling
 
+    @computed_field
     @property
     def demandSupplyRatio(self) -> float:
         return self.demand_supply_ratio
 
+    @computed_field
     @property
     def demandMultiplier(self) -> float:
         return self.demand_multiplier
 
+    @computed_field
     @property
     def timeMultiplier(self) -> float:
         return self.time_multiplier
 
+    @computed_field
     @property
     def occupancyMultiplier(self) -> float:
         return self.occupancy_multiplier
 
+    @computed_field
     @property
     def marketSegment(self) -> str:
         return self.market_segment
@@ -121,6 +162,8 @@ class PriceEstimateRequest(BaseModel):
     destination_longitude: Optional[float] = None
     duration_str: Optional[str] = None
     route_geometry: Optional[Any] = None
+    route_distance_km: Optional[float] = None
+    stored_distance_km: Optional[float] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -149,5 +192,13 @@ class PriceEstimateRequest(BaseModel):
                 mapped["duration_str"] = mapped["durationStr"]
             if "routeGeometry" in mapped:
                 mapped["route_geometry"] = mapped["routeGeometry"]
+            if "routeDistanceKm" in mapped:
+                mapped["route_distance_km"] = mapped["routeDistanceKm"]
+            elif "roadDistanceKm" in mapped:
+                mapped["route_distance_km"] = mapped["roadDistanceKm"]
+            elif "distanceKm" in mapped:
+                mapped["route_distance_km"] = mapped["distanceKm"]
+            if "storedDistanceKm" in mapped:
+                mapped["stored_distance_km"] = mapped["storedDistanceKm"]
             return mapped
         return data

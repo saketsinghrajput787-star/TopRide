@@ -105,19 +105,8 @@ class DynamicPricingEngine:
         eff_d_lat = dest_lat if dest_lat is not None else ext_d_lat
         eff_d_lon = dest_lon if dest_lon is not None else ext_d_lon
 
-        time_bucket = parse_time_bucket(eff_time)
-
-        # Cache lookup
-        cache_key = f"{o_name.lower()}:{d_name.lower()}:{eff_date}:{time_bucket}:{total_seats}:{available_seats}:{str(vehicle)}"
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if not skip_cache and override_demand_count is None and override_supply_seats is None:
-            if cache_key in cls._pricing_cache:
-                cached_time, cached_breakdown = cls._pricing_cache[cache_key]
-                if (now - cached_time).total_seconds() < cls.CACHE_TTL_SECONDS:
-                    return cached_breakdown
-
-        # 2. Base Market Price Calculation
-        base_price = BasePriceEngine.calculate_base_price(
+        # 2. Base Market Price & Distance Calculation
+        base_price, dist_km, dur_mins, dist_source, veh_factor = BasePriceEngine.calculate_base_price_details(
             origin_name=o_name,
             dest_name=d_name,
             origin_lat=eff_o_lat,
@@ -128,6 +117,17 @@ class DynamicPricingEngine:
             stored_duration_str=stored_duration_str,
             vehicle=vehicle
         )
+
+        time_bucket = parse_time_bucket(eff_time)
+
+        # Cache lookup (incorporating resolved distance)
+        cache_key = f"{o_name.lower()}:{d_name.lower()}:{eff_date}:{time_bucket}:{total_seats}:{available_seats}:{str(vehicle)}:{dist_km}"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if not skip_cache and override_demand_count is None and override_supply_seats is None:
+            if cache_key in cls._pricing_cache:
+                cached_time, cached_breakdown = cls._pricing_cache[cache_key]
+                if (now - cached_time).total_seconds() < cls.CACHE_TTL_SECONDS:
+                    return cached_breakdown
 
         # 3. Market Demand and Supply Aggregation
         if override_demand_count is not None and override_supply_seats is not None:
@@ -155,7 +155,10 @@ class DynamicPricingEngine:
             else calculate_hours_to_departure(eff_date, eff_time)
         )
         time_mult = PricingMultipliers.calculate_time_multiplier(hours_left, dsr)
-        occ_mult = PricingMultipliers.calculate_occupancy_multiplier(total_seats, available_seats)
+        
+        # Calculate actual booked seats for occupancy: max(0, total_seats - available_seats)
+        booked_seats = max(0, total_seats - available_seats)
+        occ_mult = PricingMultipliers.calculate_occupancy_multiplier(booked_seats, total_seats)
 
         combined_mult = round(demand_mult * time_mult * occ_mult, 4)
         raw_price = round(base_price * combined_mult, 2)
@@ -165,6 +168,13 @@ class DynamicPricingEngine:
 
         # 6. Explanation construction
         explanation_parts = []
+        if dist_source == "road_network":
+            explanation_parts.append(f"Road distance: {dist_km:.0f} km")
+        elif dist_source == "corridor_benchmark":
+            explanation_parts.append(f"Corridor benchmark distance: {dist_km:.0f} km")
+        else:
+            explanation_parts.append(f"Estimated route distance: {dist_km:.0f} km")
+
         if demand_level == "low":
             explanation_parts.append(f"Low demand discount applied ({int((1.0 - demand_mult) * 100)}% off base)")
         elif demand_level in ["high", "extreme"]:
@@ -184,6 +194,10 @@ class DynamicPricingEngine:
 
         breakdown = PriceBreakdown(
             base_price=base_price,
+            distance_km=dist_km,
+            duration_minutes=dur_mins,
+            distance_source=dist_source,
+            vehicle_multiplier=veh_factor,
             demand_count=demand_count,
             supply_seats=supply_seats,
             demand_supply_ratio=dsr,
@@ -198,7 +212,8 @@ class DynamicPricingEngine:
             final_price=final_price,
             currency="₹",
             calculated_at=now.isoformat(),
-            explanation=explanation
+            explanation=explanation,
+            market_segment=f"{o_name} → {d_name}"
         )
 
         # Store in cache

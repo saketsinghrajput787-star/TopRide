@@ -175,9 +175,11 @@ def test_phase4_complete_integration():
         req=PaymentOrderCreate(tripId=driver_trip.id, seatsCount=1, luggageTier="small"),
         client=saket_client
     )
+    expected_seat_price = float(driver_trip.currentMarketPrice if driver_trip.currentMarketPrice is not None else driver_trip.pricePerSeat)
+    expected_order_amount = int(round(expected_seat_price * 100))
     assert order_1.orderId.startswith("order_")
-    assert order_1.amount == 60000 # 600 rupees in paise
-    print(f"  [PASS] Created Initial Test Order: {order_1.orderId}")
+    assert order_1.amount == expected_order_amount
+    print(f"  [PASS] Created Initial Test Order: {order_1.orderId} (Amount: {order_1.amount} paise)")
 
     # Re-call with identical parameters -> MUST return identical cached order (NO duplicate API call)
     order_2 = create_razorpay_order_in_db(
@@ -195,7 +197,7 @@ def test_phase4_complete_integration():
         client=saket_client
     )
     assert order_changed.orderId != order_1.orderId
-    assert order_changed.amount == 120000 # 2 seats * 600 = 1200 rupees
+    assert order_changed.amount == expected_order_amount * 2
     print(f"  [PASS] Parameter change cleanly invalidated previous order and created new: {order_changed.orderId}")
 
     # -------------------------------------------------------------

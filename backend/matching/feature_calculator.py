@@ -43,6 +43,12 @@ CITY_COORDINATES: Dict[str, Tuple[float, float]] = {
     "jaipur": (26.9124, 75.7873),
     "ahmedabad": (23.0225, 72.5714),
     "kolkata": (22.5726, 88.3639),
+    "chandigarh": (30.7333, 76.7794),
+    "agra": (27.1767, 78.0081),
+    "lucknow": (26.8467, 80.9462),
+    "surat": (21.1702, 72.8311),
+    "bhopal": (23.2599, 77.4126),
+    "indore": (22.7196, 75.8577),
 }
 
 def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

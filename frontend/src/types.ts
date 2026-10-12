@@ -353,6 +353,10 @@ export interface AssignmentResponse {
 
 export interface PriceBreakdown {
   basePrice: number;
+  distanceKm?: number;
+  durationMinutes?: number;
+  distanceSource?: string;
+  vehicleMultiplier?: number;
   demandCount: number;
   supplySeats: number;
   demandSupplyRatio: number;
@@ -381,6 +385,7 @@ export interface PriceEstimateRequest {
   vehicleCategory?: string;
   durationStr?: string;
   routeGeometry?: any;
+  routeDistanceKm?: number;
 }
 
 

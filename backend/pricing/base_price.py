@@ -1,4 +1,5 @@
-from typing import Optional, Any, Union, Dict
+import math
+from typing import Optional, Any, Union, Dict, Tuple
 from backend.config import (
     BASE_PRICE_PER_KM, BASE_PRICE_PER_MINUTE, MINIMUM_PLATFORM_PRICE, PRICE_ROUNDING_UNIT
 )
@@ -23,6 +24,8 @@ PLATFORM_BENCHMARK_CORRIDOR_DISTANCES = {
     ("jaipur", "delhi"): 280.0,
     ("delhi", "agra"): 230.0,
     ("agra", "delhi"): 230.0,
+    ("delhi", "chandigarh"): 250.0,
+    ("chandigarh", "delhi"): 250.0,
 }
 # Backward-compatibility alias
 BENCHMARK_CORRIDOR_DISTANCES = PLATFORM_BENCHMARK_CORRIDOR_DISTANCES
@@ -36,6 +39,36 @@ VEHICLE_CATEGORY_FACTORS = {
     "premium": 1.15,
     "luxury": 1.20,
 }
+
+def validate_locations_and_coordinates(
+    origin_name: str,
+    dest_name: str,
+    origin_lat: Optional[float] = None,
+    origin_lon: Optional[float] = None,
+    dest_lat: Optional[float] = None,
+    dest_lon: Optional[float] = None
+) -> None:
+    """Validate origin and destination names and coordinate bounds, rejecting identical or invalid locations."""
+    clean_o = origin_name.strip() if origin_name else ""
+    clean_d = dest_name.strip() if dest_name else ""
+    if not clean_o or not clean_d:
+        raise ValueError("Origin and destination must be non-empty locations.")
+
+    if clean_o.lower() == clean_d.lower():
+        raise ValueError("Origin and destination cannot be identical locations.")
+
+    for label, lat, lon in [("Origin", origin_lat, origin_lon), ("Destination", dest_lat, dest_lon)]:
+        if lat is not None:
+            if math.isnan(lat) or math.isinf(lat) or not (-90.0 <= lat <= 90.0):
+                raise ValueError(f"{label} latitude must be a valid number between -90 and 90.")
+        if lon is not None:
+            if math.isnan(lon) or math.isinf(lon) or not (-180.0 <= lon <= 180.0):
+                raise ValueError(f"{label} longitude must be a valid number between -180 and 180.")
+
+    if origin_lat is not None and origin_lon is not None and dest_lat is not None and dest_lon is not None:
+        dist = haversine_distance_km(origin_lat, origin_lon, dest_lat, dest_lon)
+        if dist < 0.5:
+            raise ValueError("Origin and destination coordinates cannot be identical or zero distance apart.")
 
 def parse_duration_string_to_minutes(duration_str: Optional[str]) -> Optional[int]:
     """Parse duration like '8h 30m', '3h', '45m' to total minutes."""
@@ -92,6 +125,58 @@ class BasePriceEngine:
     """Calculates deterministic base market price based on route economics."""
 
     @classmethod
+    def resolve_route_distance_and_source(
+        cls,
+        origin_name: str,
+        dest_name: str,
+        origin_lat: Optional[float] = None,
+        origin_lon: Optional[float] = None,
+        dest_lat: Optional[float] = None,
+        dest_lon: Optional[float] = None,
+        stored_distance_km: Optional[float] = None
+    ) -> Tuple[float, str]:
+        """
+        Resolve route distance in km and identify data source adhering to priority:
+        1. Existing stored / Mapbox Directions road distance ('road_network')
+        2. Known benchmark corridor distances ('corridor_benchmark')
+        3. Coordinates with road circuity factor (1.25) ('coordinate_estimate')
+        4. Resolved city coordinates with circuity factor ('coordinate_estimate')
+        Zero external Mapbox calls.
+        """
+        validate_locations_and_coordinates(origin_name, dest_name, origin_lat, origin_lon, dest_lat, dest_lon)
+
+        # 1. Existing stored distance or Mapbox Directions road distance
+        if stored_distance_km is not None and stored_distance_km > 0:
+            return float(stored_distance_km), "road_network"
+
+        clean_o = origin_name.lower().strip()
+        clean_d = dest_name.lower().strip()
+
+        # 2. Known benchmark corridor lookup
+        for (bo, bd), dist in BENCHMARK_CORRIDOR_DISTANCES.items():
+            if bo in clean_o and bd in clean_d:
+                return float(dist), "corridor_benchmark"
+
+        # 3. Coordinate calculation with road circuity factor (1.25)
+        if origin_lat is not None and origin_lon is not None and dest_lat is not None and dest_lon is not None:
+            great_circle = haversine_distance_km(origin_lat, origin_lon, dest_lat, dest_lon)
+            if great_circle < 0.5:
+                raise ValueError("Origin and destination coordinates cannot be identical or zero distance apart.")
+            return round(great_circle * 1.25, 1), "coordinate_estimate"
+
+        # 4. Try resolving coordinates from city name
+        _, o_lat, o_lon = extract_location_info(origin_name)
+        _, d_lat, d_lon = extract_location_info(dest_name)
+        if o_lat is not None and o_lon is not None and d_lat is not None and d_lon is not None:
+            great_circle = haversine_distance_km(o_lat, o_lon, d_lat, d_lon)
+            if great_circle < 0.5:
+                raise ValueError("Origin and destination cannot resolve to identical locations.")
+            return round(great_circle * 1.25, 1), "coordinate_estimate"
+
+        # If completely unresolvable, raise validation error rather than returning a misleading constant
+        raise ValueError(f"Unable to determine route distance between '{origin_name}' and '{dest_name}'. Valid locations or coordinates are required.")
+
+    @classmethod
     def resolve_route_distance_km(
         cls,
         origin_name: str,
@@ -102,41 +187,17 @@ class BasePriceEngine:
         dest_lon: Optional[float] = None,
         stored_distance_km: Optional[float] = None
     ) -> float:
-        """
-        Resolve route distance in km adhering to priority:
-        1. Existing stored route distance
-        2. Known benchmark corridor distances
-        3. Coordinates with road circuity factor (1.25)
-        4. Default fallback distance
-        Zero Mapbox calls.
-        """
-        # 1. Existing stored distance
-        if stored_distance_km is not None and stored_distance_km > 0:
-            return float(stored_distance_km)
-
-        clean_o = origin_name.lower().strip()
-        clean_d = dest_name.lower().strip()
-
-        # 2. Known benchmark corridor lookup
-        for (bo, bd), dist in BENCHMARK_CORRIDOR_DISTANCES.items():
-            if bo in clean_o and bd in clean_d:
-                return dist
-
-        # 3. Coordinate calculation with road circuity factor (1.25)
-        if origin_lat is not None and origin_lon is not None and dest_lat is not None and dest_lon is not None:
-            great_circle = haversine_distance_km(origin_lat, origin_lon, dest_lat, dest_lon)
-            # Highway driving distance is typically 1.25x great-circle line
-            return round(great_circle * 1.25, 1)
-
-        # Try resolving coordinates from city name
-        _, o_lat, o_lon = extract_location_info(origin_name)
-        _, d_lat, d_lon = extract_location_info(dest_name)
-        if o_lat is not None and o_lon is not None and d_lat is not None and d_lon is not None:
-            great_circle = haversine_distance_km(o_lat, o_lon, d_lat, d_lon)
-            return round(great_circle * 1.25, 1)
-
-        # 4. Conservative fallback distance
-        return 120.0
+        """Resolve route distance in km adhering to priority."""
+        dist, _ = cls.resolve_route_distance_and_source(
+            origin_name=origin_name,
+            dest_name=dest_name,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
+            dest_lat=dest_lat,
+            dest_lon=dest_lon,
+            stored_distance_km=stored_distance_km
+        )
+        return dist
 
     @classmethod
     def resolve_route_duration_minutes(
@@ -151,6 +212,52 @@ class BasePriceEngine:
         # Average intercity highway speed ~65 km/h
         hours = distance_km / 65.0
         return max(30, int(round(hours * 60)))
+
+    @classmethod
+    def calculate_base_price_details(
+        cls,
+        origin_name: Optional[str] = None,
+        dest_name: Optional[str] = None,
+        origin_lat: Optional[float] = None,
+        origin_lon: Optional[float] = None,
+        dest_lat: Optional[float] = None,
+        dest_lon: Optional[float] = None,
+        stored_distance_km: Optional[float] = None,
+        stored_duration_str: Optional[str] = None,
+        vehicle: Any = None,
+        origin: Optional[str] = None,
+        destination: Optional[str] = None,
+        vehicle_category: Any = None,
+        duration_str: Optional[str] = None,
+        route_distance_km: Optional[float] = None,
+        route_duration_minutes: Optional[float] = None,
+        **kwargs: Any
+    ) -> Tuple[float, float, int, str, float]:
+        """
+        Calculate fundamental base market price per seat with transparent breakdown:
+        Returns: (base_price, distance_km, duration_minutes, distance_source, vehicle_factor)
+        """
+        o_name = origin or origin_name or ""
+        d_name = destination or dest_name or ""
+        veh = vehicle if vehicle is not None else vehicle_category
+        dur_str = duration_str or stored_duration_str
+        dist_in = route_distance_km if route_distance_km is not None else stored_distance_km
+
+        dist_km, dist_source = cls.resolve_route_distance_and_source(
+            o_name, d_name, origin_lat, origin_lon, dest_lat, dest_lon, dist_in
+        )
+        if route_duration_minutes is not None:
+            dur_mins = int(round(route_duration_minutes))
+        else:
+            dur_mins = cls.resolve_route_duration_minutes(dist_km, dur_str)
+        vehicle_factor = resolve_vehicle_category_factor(veh)
+
+        raw_cost = (dist_km * BASE_PRICE_PER_KM) + (dur_mins * BASE_PRICE_PER_MINUTE)
+        adjusted = max(MINIMUM_PLATFORM_PRICE, raw_cost) * vehicle_factor
+
+        # Round to nearest currency unit
+        rounded = round(adjusted / PRICE_ROUNDING_UNIT) * PRICE_ROUNDING_UNIT
+        return float(rounded), float(dist_km), int(dur_mins), str(dist_source), float(vehicle_factor)
 
     @classmethod
     def calculate_base_price(
@@ -176,24 +283,27 @@ class BasePriceEngine:
         Calculate fundamental base market price per seat:
         base_price = max(MINIMUM_PLATFORM_PRICE, (D * rate_km) + (T * rate_min)) * vehicle_factor
         """
-        o_name = origin or origin_name or ""
-        d_name = destination or dest_name or ""
-        veh = vehicle if vehicle is not None else vehicle_category
-        dur_str = duration_str or stored_duration_str
-        dist_in = route_distance_km if route_distance_km is not None else stored_distance_km
-
-        dist_km = cls.resolve_route_distance_km(
-            o_name, d_name, origin_lat, origin_lon, dest_lat, dest_lon, dist_in
+        base_price, _, _, _, _ = cls.calculate_base_price_details(
+            origin_name=origin_name,
+            dest_name=dest_name,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
+            dest_lat=dest_lat,
+            dest_lon=dest_lon,
+            stored_distance_km=stored_distance_km,
+            stored_duration_str=stored_duration_str,
+            vehicle=vehicle,
+            origin=origin,
+            destination=destination,
+            vehicle_category=vehicle_category,
+            duration_str=duration_str,
+            route_distance_km=route_distance_km,
+            route_duration_minutes=route_duration_minutes,
+            **kwargs
         )
-        if route_duration_minutes is not None:
-            dur_mins = int(round(route_duration_minutes))
-        else:
-            dur_mins = cls.resolve_route_duration_minutes(dist_km, dur_str)
-        vehicle_factor = resolve_vehicle_category_factor(veh)
+        return base_price
 
-        raw_cost = (dist_km * BASE_PRICE_PER_KM) + (dur_mins * BASE_PRICE_PER_MINUTE)
-        adjusted = max(MINIMUM_PLATFORM_PRICE, raw_cost) * vehicle_factor
 
-        # Round to nearest currency unit
-        rounded = round(adjusted / PRICE_ROUNDING_UNIT) * PRICE_ROUNDING_UNIT
-        return float(rounded)
+# Module-level aliases
+resolve_route_distance_and_source = BasePriceEngine.resolve_route_distance_and_source
+calculate_base_price_details = BasePriceEngine.calculate_base_price_details
